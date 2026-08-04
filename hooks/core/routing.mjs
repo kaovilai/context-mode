@@ -894,8 +894,11 @@ export function routePreToolUse(toolName, toolInput, projectDir, platform, sessi
   if (canonical === "Agent") {
     // Per-project/session opt-out (#967): auto-mode permission classifiers may
     // read the injected block as prompt injection and veto the spawn itself.
-    // Set CONTEXT_MODE_SUBAGENT_ROUTING=0 to skip prompt injection entirely.
-    if (process.env.CONTEXT_MODE_SUBAGENT_ROUTING === "0") {
+    // Set CONTEXT_MODE_SUBAGENT_ROUTING=0 (or false/off/no) to skip prompt
+    // injection entirely — this also skips the Bash->general-purpose subagent
+    // upgrade below, since that upgrade only exists so the subagent can reach
+    // the ctx_* tools the now-omitted block references.
+    if (["0", "false", "off", "no"].includes(String(process.env.CONTEXT_MODE_SUBAGENT_ROUTING).trim().toLowerCase())) {
       return null;
     }
     const subagentType = toolInput.subagent_type ?? "";
@@ -911,6 +914,7 @@ export function routePreToolUse(toolName, toolInput, projectDir, platform, sessi
     const subagentBlock = createRoutingBlock(t, {
       includeCommands: false,
       toolSearchBootstrap: isClaudeCode,
+      includeProvenance: true,
     });
 
     const updatedInput =

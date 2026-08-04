@@ -538,6 +538,16 @@ describe("routePreToolUse", () => {
   // ─── Subagent ctx_commands omission (#233) ──────────────
 
   describe("Subagent ctx_commands omission (#233)", () => {
+    let prevSubagentRouting: string | undefined;
+    beforeEach(() => {
+      prevSubagentRouting = process.env.CONTEXT_MODE_SUBAGENT_ROUTING;
+      delete process.env.CONTEXT_MODE_SUBAGENT_ROUTING;
+    });
+    afterEach(() => {
+      if (prevSubagentRouting === undefined) delete process.env.CONTEXT_MODE_SUBAGENT_ROUTING;
+      else process.env.CONTEXT_MODE_SUBAGENT_ROUTING = prevSubagentRouting;
+    });
+
     it("Agent subagent prompt omits ctx_commands", () => {
       const result = routePreToolUse("Agent", {
         prompt: "Search the codebase",
@@ -586,6 +596,28 @@ describe("routePreToolUse", () => {
         if (prev === undefined) delete process.env.CONTEXT_MODE_SUBAGENT_ROUTING;
         else process.env.CONTEXT_MODE_SUBAGENT_ROUTING = prev;
       }
+    });
+
+    it.each(["false", "off", "no", "FALSE", " 0 "])(
+      "CONTEXT_MODE_SUBAGENT_ROUTING=%s also skips Agent prompt injection (#967)",
+      (value) => {
+        process.env.CONTEXT_MODE_SUBAGENT_ROUTING = value;
+        const result = routePreToolUse("Agent", {
+          prompt: "Research this repository",
+          subagent_type: "general-purpose",
+        });
+        expect(result).toBeNull();
+      }
+    );
+
+    it("subagent block includes provenance but main-session ROUTING_BLOCK does not (#967)", () => {
+      const result = routePreToolUse("Agent", {
+        prompt: "Research this repository",
+        subagent_type: "general-purpose",
+      });
+      const prompt = (result!.updatedInput as Record<string, string>).prompt;
+      expect(prompt).toContain("<provenance>");
+      expect(ROUTING_BLOCK).not.toContain("<provenance>");
     });
 
     it("ROUTING_BLOCK constant includes ctx_commands for main session", () => {
