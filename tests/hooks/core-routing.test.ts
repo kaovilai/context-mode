@@ -563,6 +563,31 @@ describe("routePreToolUse", () => {
       expect(prompt).not.toContain("<ctx_commands>");
     });
 
+    it("subagent block self-identifies as locally installed plugin (#967)", () => {
+      const result = routePreToolUse("Agent", {
+        prompt: "Research this repository",
+        subagent_type: "general-purpose",
+      });
+      const prompt = (result!.updatedInput as Record<string, string>).prompt;
+      expect(prompt).toContain("<provenance>");
+      expect(prompt).toContain("user installed and enabled locally");
+    });
+
+    it("CONTEXT_MODE_SUBAGENT_ROUTING=0 skips Agent prompt injection (#967)", () => {
+      const prev = process.env.CONTEXT_MODE_SUBAGENT_ROUTING;
+      process.env.CONTEXT_MODE_SUBAGENT_ROUTING = "0";
+      try {
+        const result = routePreToolUse("Agent", {
+          prompt: "Research this repository",
+          subagent_type: "general-purpose",
+        });
+        expect(result).toBeNull();
+      } finally {
+        if (prev === undefined) delete process.env.CONTEXT_MODE_SUBAGENT_ROUTING;
+        else process.env.CONTEXT_MODE_SUBAGENT_ROUTING = prev;
+      }
+    });
+
     it("ROUTING_BLOCK constant includes ctx_commands for main session", () => {
       expect(ROUTING_BLOCK).toContain("<ctx_commands>");
       expect(ROUTING_BLOCK).toContain("ctx stats");
