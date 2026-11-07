@@ -342,6 +342,8 @@ interface LegacySession {
 export interface DaemonHandle {
   port: number;
   url: string;
+  /** The current in-flight handler count (tests synchronize shutdown on it). */
+  inFlight(): number;
   close(): Promise<void>;
 }
 
@@ -437,10 +439,19 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
   // systemd stops the unit with SIGTERM; a foreground Ctrl-C is SIGINT. Both take the stdio shutdown
   // path (removeOwnerPid, closeDb, D-M5-R1-1 stop marker), then let the loop empty (impl/11 §4 steps 2-3).
   const stop = (): void => {
-    // Order matters (A26-r7): stop accepting, AWAIT the transports settling (in-flight requests
-    // finish or fail against a live server), and only then close the databases they use.
     void (async () => {
+      // A26-r12 order: the backstop starts FIRST (it must bound every wait below), then stop
+      // accepting, then WAIT OUT the in-flight handlers while their transports still stand (the
+      // SDK's transport close ABORTS active requests without waiting for the handlers — closing
+      // the transports first would cut the calls the drain is waiting for), then close the
+      // transports, and only then the databases those handlers used.
+      setTimeout(() => process.exit(0), 2000).unref();
       http.close(() => {});
+      await Promise.race([core.drain(), new Promise<void>((r) => setTimeout(r, 1500))]);
+      // the handler promise resolving is the last thing the daemon controls: the SDK still has
+      // to serialize and send the response afterwards, so give the flush a bounded window
+      // before the transports go away (A26-r12)
+      await new Promise((r) => setTimeout(r, 100));
       await Promise.allSettled([
         modern.close().catch(() => {}),
         ...[...sessions.values()].map((entry) => entry.server.close().catch(() => {})),
@@ -450,9 +461,8 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
       http.closeAllConnections?.(); // a wedged SSE stream never blocks the stop
       // settle the entry's top-level await: process.exit() over a pending TLA is exit
       // code 13 ("unsettled top-level await"), not 0. With it settled, the loop drains
-      // and node exits 0 on its own; the timer is only the wedged-connection backstop.
+      // and node exits 0 on its own.
       onStopped?.();
-      setTimeout(() => process.exit(0), 2000).unref();
     })();
   };
   process.once("SIGTERM", stop);
@@ -461,9 +471,16 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
   return {
     port: boundPort,
     url: `http://${DAEMON_HOST}:${boundPort}${DAEMON_PATH}`,
+    inFlight: core.inFlight,
     close: async () => {
-      // connections drop BEFORE the http.close callback is awaited: an open SSE stream
-      // keeps that callback pending forever (A26-r11)
+      // A26-r12: stop accepting, wait out the in-flight handlers while their transports still
+      // stand (the drain is bounded — a wedged handler cannot hang the close), then close the
+      // transports, then the databases; connections drop before the close callback is awaited
+      // (an open SSE stream keeps that callback pending forever, A26-r11).
+      http.close(() => {});
+      await Promise.race([core.drain(), new Promise<void>((r) => setTimeout(r, 4000))]);
+      // bounded response-flush window before the transports close (A26-r12)
+      await new Promise((r) => setTimeout(r, 100));
       await Promise.allSettled([
         modern.close().catch(() => {}),
         ...[...sessions.values()].map((entry) => entry.server.close().catch(() => {})),

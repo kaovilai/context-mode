@@ -198,6 +198,11 @@ export function stdioRouting(argv: string[], env: NodeJS.ProcessEnv, serverId: s
 export interface ServerCore {
   readonly serverId: string;
   readonly degraded: boolean;
+  /** A26-r12: resolves when no tool-call handler is mid-flight (shutdown waits for this, so a
+   * handler never runs into databases the shutdown closed). */
+  drain(): Promise<void>;
+  /** A26-r12: the current in-flight handler count (tests synchronize on it). */
+  inFlight(): number;
   /** §5 step 9a, impl/02 §7.2: removeOwnerPid, then closeDb, each best-effort (never blocks shutdown). */
   shutdown(): void;
   /** D-M5-R1-1: the uninstall stop takes the same path as stdin EOF. */
@@ -280,8 +285,39 @@ export async function createServerCore(argv: string[], env: NodeJS.ProcessEnv): 
   }
 
   // §5 steps 5-7: stateless dispatch; ToolContext is built fresh from each request.
+  // A26-r12: in-flight tool-call handlers, so a shutdown can wait them out instead of closing
+  // the databases underneath one. Counted per call; drain() resolves when the count returns to 0.
+  let activeCalls = 0;
+  let idleWaiters: (() => void)[] = [];
+  const callStarted = (): void => {
+    activeCalls++;
+  };
+  const callEnded = (): void => {
+    activeCalls--;
+    if (activeCalls === 0) {
+      const wake = idleWaiters;
+      idleWaiters = [];
+      for (const w of wake) w();
+    }
+  };
+  const inFlight = (): number => activeCalls;
+  const drain = async (): Promise<void> => {
+    if (activeCalls === 0) return;
+    await new Promise<void>((resolve) => { idleWaiters.push(resolve); });
+  };
+
   function dispatch(server: McpServer, tool: RegisteredTool<unknown>, routing: CallRouting) {
     return async (input: unknown, req: ServerContext) => {
+      callStarted();
+      try {
+        return await dispatchInner(server, tool, routing, input, req);
+      } finally {
+        callEnded();
+      }
+    };
+  }
+
+  async function dispatchInner(server: McpServer, tool: RegisteredTool<unknown>, routing: CallRouting, input: unknown, req: ServerContext) {
       const meta = req.mcpReq._meta as Record<string, unknown> | undefined;
       const agent = routing.agentOf(server, meta, req);
       // §5 step 6a, 7a: resolved lazily, at most once per call, never cached across calls.
@@ -342,7 +378,6 @@ export async function createServerCore(argv: string[], env: NodeJS.ProcessEnv): 
         }
       }
       return { content: [{ type: "text" as const, text: reply.text }], isError: reply.isError };
-    };
   }
 
   // §5 step 4. One factory serves both eras through the SDK's own negotiation: initialize (2025-xx)
@@ -395,5 +430,5 @@ export async function createServerCore(argv: string[], env: NodeJS.ProcessEnv): 
     process.kill(process.pid, "SIGTERM");
   }
 
-  return { serverId, degraded, shutdown, stopSelf, createMcpServer };
+  return { serverId, degraded, drain, inFlight, shutdown, stopSelf, createMcpServer };
 }

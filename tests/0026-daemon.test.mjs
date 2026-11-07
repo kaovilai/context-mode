@@ -398,6 +398,28 @@ describe("A26 review round 1", { concurrency: false }, () => {
     await client.close().catch(() => {});
   });
 
+  test("an in-flight database call completes through close() (A26-r12: drain before shutdown)", async () => {
+    const { startDaemon } = await import("../src/entries/daemon.ts");
+    const handle = await startDaemon([], { ...process.env, HOME: root, USERPROFILE: root });
+    const client = new Client({ name: "claude-code", version: "2.1.303" });
+    const transport = new StreamableHTTPClientTransport(new URL(handle.url), {
+      requestInit: { headers: { "x-context-mode-workspace": repo } },
+    });
+    await client.connect(transport);
+    // fire a call whose dispatch spans the sandbox run AND its journal write (the DB write is
+    // part of the counted dispatch), SYNCHRONIZE on the handler being mid-flight (inFlight),
+    // then close: the drain must hold the transports and the core open until the dispatch
+    // finishes, so the call succeeds with its row written to still-open databases
+    const call = client.callTool({ name: "ctx_execute", arguments: { language: "bash", code: "sleep 1" } });
+    const until = Date.now() + 10000;
+    while (handle.inFlight() < 1 && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(handle.inFlight() >= 1, "the call must be mid-flight before the close starts");
+    await handle.close();
+    const r = await call;
+    assert.notEqual(r.isError, true, JSON.stringify(r.content));
+    await client.close().catch(() => {});
+  });
+
   test("--install with no HOME is a line, not a stack trace (A26-r10)", async () => {
     await spawnDaemon(); // ensure the bundle exists
     const r = spawnSync(process.execPath, [join(bundleDir, "daemon.mjs"), "--install"], {
