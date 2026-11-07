@@ -79,6 +79,11 @@ Two consequences to know:
   (`--header "x-context-mode-session: $CLAUDE_CODE_SESSION_ID"` in a config that expands it per
   session). Claude Code's `claude mcp add` headers are static, so until it grows dynamic headers,
   session-scoped hook continuity keeps requiring the stdio spawn; project scope is unaffected.
+- The trust boundary is the loopback port: any LOCAL process can reach the daemon and set the
+  session header to another session's id, reading that session's `scope: "session"` rows. That is
+  the same local trust as a stdio spawn (any local process can spawn its own server); there is no
+  inbound authentication by design. The header value is validated (bounded, plain id characters)
+  before it is used as a journal key.
 - A request with no identity at all gets a fresh id per request: its `scope: "session"` rows are
   write-only (it cannot even read back its own), but two unidentified clients can never see each
   other's rows. Sending `_meta.sessionId` (most SDK clients can) or the header restores continuity.

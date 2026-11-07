@@ -293,7 +293,7 @@ claude mcp add --transport http context-mode http://127.0.0.1:8790/mcp
 ```
 
 With the plugin installed this adds a SECOND registration next to its stdio server — remove one
-(`claude plugin uninstall context-mode@context-mode` or `claude mcp remove context-mode`).
+(`claude mcp remove context-mode`, or uninstall the plugin, which also removes its hooks).
 
 One process serves every session and every project; each session keeps its own session scope when
 its client names the session (see docs/daemon.md). Steps for other agents, per-project wiring, the

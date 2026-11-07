@@ -88,14 +88,17 @@ export function metaNumber(meta: Record<string, unknown> | undefined, key: strin
 }
 
 // D-CR2-SID-1: _meta.sessionId, else the session id the host put in the server env (the id its hooks
-// journal under, so scope:"session" finds hook-indexed rows), else the process-local mcp:<serverId>.
-export function sessionIdOf(meta: Record<string, unknown> | undefined, agent: AgentId | undefined, env: NodeJS.ProcessEnv, serverId: string): string {
+// journal under, so scope:"session" finds hook-indexed rows), else the caller's fallback id,
+// UNCHANGED: the stdio routing passes mcp:<serverId> (a process-local id), the daemon routing
+// passes the session header, the transport session id, or a fresh anonymous id — prefixing here
+// would break the header case, whose whole point is to equal the hooks' unprefixed host id (A26-r8).
+export function sessionIdOf(meta: Record<string, unknown> | undefined, agent: AgentId | undefined, env: NodeJS.ProcessEnv, fallbackId: string): string {
   const fromMeta = metaString(meta, "sessionId");
   if (fromMeta !== undefined) return fromMeta;
   const key = agent === undefined ? undefined : HOST_SESSION_ENV[agent];
   const fromHost = key === undefined ? undefined : env[key];
   if (typeof fromHost === "string" && fromHost !== "") return fromHost;
-  return RUN_SESSION_PREFIX + serverId;
+  return fallbackId;
 }
 
 // D-C166-NATIVE-CWD-1: a plugin host starts this server in the plugin dir (Codex mcp.json "cwd": "."), so the spawn cwd
@@ -188,7 +191,7 @@ export function stdioRouting(argv: string[], env: NodeJS.ProcessEnv, serverId: s
       return { cwd: workspaceCwdOf(meta, process.cwd(), process.argv[1]), argv: callArgv };
     },
     envOf: () => env,
-    fallbackIdOf: () => serverId,
+    fallbackIdOf: () => RUN_SESSION_PREFIX + serverId, // process-local id (§4 step 5, 00 A8)
   };
 }
 

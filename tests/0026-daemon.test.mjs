@@ -18,6 +18,7 @@ import { route } from "../src/entries/cli.ts";
 import { HELP_MAIN } from "../src/cli/args.ts";
 import { checkDaemon } from "../src/core/ops/doctor-env.ts";
 import { isAbsoluteWorkspacePath } from "../src/entries/daemon.ts";
+import { sessionIdOf } from "../src/entries/server-core.ts";
 import { DAEMON_ADD_COMMAND, DAEMON_CHECK_FIX, DAEMON_DEFAULT_PORT, DAEMON_PORT_ENV, DAEMON_SESSION_HEADER } from "../src/core/contracts/constants.ts";
 
 const REPO = join(import.meta.dirname, "..");
@@ -349,8 +350,17 @@ describe("A26 review round 1", { concurrency: false }, () => {
     assert.ok(a.startsWith("anon-") && b.startsWith("anon-"), `${a} ${b}`);
     const withHeader = { http: { req: { headers: new Headers({ [DAEMON_SESSION_HEADER]: "host-1" }) } }, sessionId: undefined };
     assert.equal(routing.fallbackIdOf(withHeader), "host-1");
+    // unprefixed through sessionIdOf: the whole point is to equal the hooks' host id (A26-r8)
+    assert.equal(sessionIdOf(undefined, "claude-code", {}, routing.fallbackIdOf(withHeader)), "host-1");
+    // a hostile header value is ignored, never a journal key (A26-r9)
+    for (const bad of ["has space", "x".repeat(129), ";; rm -rf", "drop;table"]) {
+      const hostile = { http: { req: { headers: new Headers({ [DAEMON_SESSION_HEADER]: bad }) } }, sessionId: "transport-1" };
+      assert.equal(routing.fallbackIdOf(hostile), "transport-1", bad);
+    }
     const withTransport = { http: { req: { headers: new Headers() } }, sessionId: "transport-1" };
     assert.equal(routing.fallbackIdOf(withTransport), "transport-1");
+    // the stdio fallback keeps its process-local prefix
+    assert.equal(sessionIdOf(undefined, "claude-code", {}, "mcp:proc"), "mcp:proc");
   });
 
   test("SIGTERM during an in-flight tool call exits cleanly (A26-r7: core shuts down last)", async () => {

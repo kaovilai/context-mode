@@ -133,6 +133,16 @@ Options:
 Exit codes: 0 success, 1 the port is taken or systemd failed, 2 usage error.
 `;
 
+/** The session header, validated: a bounded, plain id (no controls, no spaces, <=128 chars).
+ * Any local process that can reach the loopback port can still SET it to another session's id —
+ * that is the documented local-trust boundary (docs/daemon.md), same as a stdio spawn — but a
+ * hostile value at least cannot smuggle arbitrary bytes into the journal key (A26-r9). */
+function sessionHeaderOf(req: ServerContext): string | undefined {
+  const raw = req.http?.req?.headers.get(DAEMON_SESSION_HEADER);
+  if (typeof raw !== "string" || raw === "") return undefined;
+  return /^[A-Za-z0-9._:-]{1,128}$/.test(raw) ? raw : undefined;
+}
+
 /** A workspace header value that names a real workspace: POSIX absolute, Windows drive
  * (C:\ or C:/) or UNC (\\server\share); a relative path or a bare word is ignored (D-A26-ws-1). */
 export function isAbsoluteWorkspacePath(raw: string): boolean {
@@ -178,7 +188,7 @@ export function daemonRouting(argv: string[], env: NodeJS.ProcessEnv, core: Serv
     // unidentified clients can never see each other's rows (A26-r6) — the process id must never
     // be the fallback, it pools every anonymous client into one session.
     fallbackIdOf: (req) =>
-      req.http?.req?.headers.get(DAEMON_SESSION_HEADER) ?? req.sessionId ?? "anon-" + randomUUID(),
+      sessionHeaderOf(req) ?? req.sessionId ?? "anon-" + randomUUID(),
   };
 }
 
