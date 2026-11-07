@@ -19,6 +19,7 @@ export const CLIENT_NAME_TO_PLATFORM: Record<string, PlatformId> = {
   "agy": "antigravity-cli",
   "cursor-vscode": "cursor",
   "Visual-Studio-Code": "vscode-copilot",
+  "Visual Studio Code": "vscode-copilot", // the name the vscode-mcp extension actually sends (tests/0007 fixture)
   "copilot-cli": "copilot-cli",
   "GitHub Copilot CLI": "copilot-cli",
   "github-copilot-cli": "copilot-cli",
@@ -61,6 +62,8 @@ export const PLATFORM_TO_AGENT: Readonly<Partial<Record<PlatformId, import("./ag
   "qwen-code": "qwen",
   "opencode": "opencode",
   "kiro": "kiro",
-  "pi": "pi",
+  // "pi" is deliberately NOT mapped: pi's project resolution needs piCwd (where the pi CLI keeps
+  // its per-session data), which a shared daemon cannot know per session; a pi client falls back
+  // to the daemon's own --agent instead of being routed to a broken project (A26-r4).
 });
 

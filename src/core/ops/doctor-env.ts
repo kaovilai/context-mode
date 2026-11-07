@@ -296,7 +296,10 @@ export async function checkDaemon(env: NodeJS.ProcessEnv): Promise<DoctorRow | u
   try {
     const r = await fetch(`http://${DAEMON_HOST}:${port}${DAEMON_HEALTH_PATH}`, { signal: AbortSignal.timeout(DAEMON_PROBE_TIMEOUT_MS), redirect: "manual" });
     const prefix = self === undefined ? "" : DAEMON_CHECK_SELF_DETAIL + "; ";
-    return row("PASS", `${prefix}${DAEMON_CHECK_PASS_DETAIL} at ${daemonUrlOf(port)} (HTTP ${r.status})`);
+    // Anything that is not the daemon's own 204 (a 404 from another service, a 500) is NOT
+    // a healthy daemon: fetch resolves for every response, so the status is the verdict.
+    if (r.status === 204) return row("PASS", `${prefix}${DAEMON_CHECK_PASS_DETAIL} at ${daemonUrlOf(port)}`);
+    return row("FAIL", `${daemonUrlOf(port)} answered HTTP ${r.status}, not the daemon's 204`, DAEMON_CHECK_FIX);
   } catch {
     return row("FAIL", `${DAEMON_CHECK_DOWN_DETAIL} ${daemonUrlOf(port)}`, DAEMON_CHECK_FIX);
   }

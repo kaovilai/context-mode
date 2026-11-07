@@ -65,6 +65,23 @@ Each session keeps its own session scope (a `scope: "session"` search never sees
 rows); the project index is shared by design, so `scope: "project"` finds what any session of that
 project indexed.
 
+## Session identity over HTTP
+
+The daemon names a session by, in order: the request's `_meta.sessionId`, the
+`x-context-mode-session` header, the transport session id (`mcp-session-id`, one per connection).
+A client that sends none of these shares the process-wide fallback id.
+
+Two consequences to know:
+
+- A host whose **hooks** journal rows under its own session id (Claude Code journals under
+  `CLAUDE_CODE_SESSION_ID`) only matches those rows over the daemon when its MCP connection sends
+  that id — today that means a client that can set per-session headers
+  (`--header "x-context-mode-session: $CLAUDE_CODE_SESSION_ID"` in a config that expands it per
+  session). Claude Code's `claude mcp add` headers are static, so until it grows dynamic headers,
+  session-scoped hook continuity keeps requiring the stdio spawn; project scope is unaffected.
+- Clients that cannot be told apart at all fall back to one shared id: their `scope: "session"`
+  rows pool. Sending `_meta.sessionId` (most SDK clients can) or the header keeps them separate.
+
 ## Check it
 
 The daemon answers a liveness probe with no MCP traffic:

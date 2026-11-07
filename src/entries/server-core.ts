@@ -215,7 +215,11 @@ export async function createServerCore(argv: string[], env: NodeJS.ProcessEnv): 
   // resources, not identity: the ProjectContext itself is resolved again on every call (§5 step 5b).
   const pending = new Map<string, Promise<DbHandle>>(); // dbPath -> open in progress or done
   const held: DbHandle[] = [];
-  let cleaned = false; // D-M1-11: cleanup runs once per process, never on a timer
+  // D-M1-11: cleanup runs once per database, never on a timer. The daemon serves many projects
+  // through one process, so "once per process" would clean only the first project (A26-r1).
+  // The dead-project sweep stays once per process: it walks every project's files (D-M1-T7-1).
+  const cleaned = new Set<string>();
+  let swept = false;
 
   // §5 step 6b, D-M1-11, D-M1-T7-1: openDb, then cleanupProject (before our own owner file, else
   // its live-owner check always sees us), then writeOwnerPid, then sweepDeadProjects.
@@ -224,15 +228,19 @@ export async function createServerCore(argv: string[], env: NodeJS.ProcessEnv): 
     // D-M1-T3-5: the config dir comes from the process env, the same one resolveProject used.
     const configDir = resolveConfigDir(process.env);
     try {
-      if (!cleaned) cleanupProject(db, configDir);
+      const dbPath = project.projectKey;
+      if (!cleaned.has(dbPath)) {
+        cleaned.add(dbPath);
+        cleanupProject(db, configDir);
+      }
       writeOwnerPid(configDir, project.projectKey, serverId);
     } catch (err) {
       closeDb(db);
       throw err;
     }
     held.push(db);
-    if (!cleaned) {
-      cleaned = true;
+    if (!swept) {
+      swept = true;
       sweepDeadProjects(configDir);
     }
     return db;

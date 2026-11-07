@@ -163,6 +163,7 @@ export const DAEMON_HEALTH_PATH = "/healthz"; // liveness probe: 204, no MCP tra
 // (Codex sandboxCwd) and answers no roots/list names the workspace in this header (claude mcp add --header).
 export const DAEMON_WORKSPACE_HEADER = "x-context-mode-workspace";
 export const DAEMON_AGENT_HEADER = "x-context-mode-agent"; // same route for the agent id, when the client name is unknown
+export const DAEMON_SESSION_HEADER = "x-context-mode-session"; // the HOST session id (e.g. claude-code's CLAUDE_CODE_SESSION_ID), when the client can set per-session headers: matches the id its hooks journal under, so scope:"session" sees hook-indexed rows
 export const DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}`; // default; the port may differ
 export function daemonUrlOf(port: number): string { return `http://${DAEMON_HOST}:${port}${DAEMON_PATH}`; }
 export function DAEMON_ADD_COMMAND(url: string): string { return `claude mcp add --transport http context-mode ${url}`; }

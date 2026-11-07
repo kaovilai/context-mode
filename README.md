@@ -292,8 +292,12 @@ context-mode daemon --install
 claude mcp add --transport http context-mode http://127.0.0.1:8790/mcp
 ```
 
-One process serves every session and every project; each session keeps its own session scope. Steps
-for other agents, per-project wiring, the doctor check and removal: docs/daemon.md in this repo.
+With the plugin installed this adds a SECOND registration next to its stdio server — remove one
+(`claude plugin uninstall context-mode@context-mode` or `claude mcp remove context-mode`).
+
+One process serves every session and every project; each session keeps its own session scope when
+its client names the session (see docs/daemon.md). Steps for other agents, per-project wiring, the
+doctor check and removal: docs/daemon.md in this repo.
 
 ## Try it
 

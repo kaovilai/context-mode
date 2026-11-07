@@ -28,7 +28,7 @@ import type { ServerContext } from "@modelcontextprotocol/server";
 import { AGENT_IDS, type AgentId } from "../core/contracts/agents.ts";
 import { CLIENT_NAME_TO_PLATFORM, PLATFORM_TO_AGENT } from "../core/contracts/client-map.ts";
 import {
-  DAEMON_ADD_COMMAND, DAEMON_AGENT_HEADER, DAEMON_DEFAULT_PORT, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PATH,
+  DAEMON_ADD_COMMAND, DAEMON_AGENT_HEADER, DAEMON_DEFAULT_PORT, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PATH, DAEMON_SESSION_HEADER,
   DAEMON_PORT_ENV, DAEMON_UNIT_DIR, DAEMON_UNIT_NAME, DAEMON_WORKSPACE_HEADER, HOST_SESSION_ENV, WORKSPACE_FOLDER_FLAG,
 } from "../core/contracts/constants.ts";
 import { homeDirOf } from "../core/project/config-dir.ts";
@@ -133,6 +133,12 @@ Options:
 Exit codes: 0 success, 1 the port is taken or systemd failed, 2 usage error.
 `;
 
+/** A workspace header value that names a real workspace: POSIX absolute, Windows drive
+ * (C:\ or C:/) or UNC (\\server\share); a relative path or a bare word is ignored (D-A26-ws-1). */
+export function isAbsoluteWorkspacePath(raw: string): boolean {
+  return raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith("\\\\");
+}
+
 /** ADR-0026 decision 3: per-request routing for the daemon (see the file header). */
 export function daemonRouting(argv: string[], env: NodeJS.ProcessEnv, core: ServerCore): CallRouting {
   // The daemon env is shared by every session, so the keys that pin one identity in a stdio spawn are
@@ -146,7 +152,7 @@ export function daemonRouting(argv: string[], env: NodeJS.ProcessEnv, core: Serv
   const cwdFallback = pinnedProject !== undefined && pinnedProject !== "" ? pinnedProject : process.cwd();
   const headerWorkspace = (req: ServerContext): string | undefined => {
     const raw = req.http?.req?.headers.get(DAEMON_WORKSPACE_HEADER);
-    return typeof raw === "string" && raw !== "" && raw.startsWith("/") ? raw : undefined;
+    return typeof raw === "string" && raw !== "" && isAbsoluteWorkspacePath(raw) ? raw : undefined;
   };
   return {
     agentOf: (server, _meta, req) => {
@@ -165,7 +171,10 @@ export function daemonRouting(argv: string[], env: NodeJS.ProcessEnv, core: Serv
       return { cwd: ws, argv: callArgv };
     },
     envOf: () => scrubbed,
-    fallbackIdOf: (req) => req.sessionId ?? core.serverId, // one transport session = one fallback id, never the process id
+    // Session identity for a shared process: the HOST session id when the client can set
+    // per-session headers (it matches the id its hooks journal under, so scope:"session" finds
+    // hook-indexed rows), else the transport session (one per connection), never the process id.
+    fallbackIdOf: (req) => req.http?.req?.headers.get(DAEMON_SESSION_HEADER) ?? req.sessionId ?? core.serverId,
   };
 }
 
@@ -226,6 +235,12 @@ async function sendResponse(res: ServerResponse, response: Response): Promise<vo
 
 // ---- systemd user unit ----
 
+/** systemd double-quoting for ExecStart/Environment words: a path with spaces (an npm prefix
+ * like `/home/user/context mode`) must stay one argument (A26-r2). */
+function systemdQuote(value: string): string {
+  return `"${value.replace(/(["\\])/g, "\\$1")}"`;
+}
+
 export function daemonUnitText(nodeBin: string, daemonBundle: string, port: number): string {
   return [
     "[Unit]",
@@ -234,8 +249,8 @@ export function daemonUnitText(nodeBin: string, daemonBundle: string, port: numb
     "",
     "[Service]",
     "Type=simple",
-    `ExecStart=${nodeBin} ${daemonBundle}`,
-    `Environment=${DAEMON_PORT_ENV}=${port}`,
+    `ExecStart=${systemdQuote(nodeBin)} ${systemdQuote(daemonBundle)}`,
+    `Environment=${systemdQuote(`${DAEMON_PORT_ENV}=${port}`)}`,
     "Restart=on-failure",
     "RestartSec=1",
     "",
@@ -253,7 +268,10 @@ function unitPath(env: NodeJS.ProcessEnv): string {
 
 function systemctl(env: NodeJS.ProcessEnv, args: string[]): { ok: boolean; line: string } {
   const r = spawnSync("systemctl", ["--user", ...args], { encoding: "utf8", env, windowsHide: true });
-  const line = (r.stdout + r.stderr).split("\n").map((l) => l.trim()).filter(Boolean).join(" | ");
+  // no systemd (macOS, Windows, a container): the spawn fails, stdout/stderr are null —
+  // a "not started" line, never a TypeError from null.split (A26-r5)
+  if (r.error !== undefined) return { ok: false, line: r.error.message };
+  const line = ((r.stdout ?? "") + (r.stderr ?? "")).split("\n").map((l) => l.trim()).filter(Boolean).join(" | ");
   return { ok: r.status === 0, line };
 }
 
@@ -278,9 +296,13 @@ export function runDaemonUnitAction(args: DaemonArgs, env: NodeJS.ProcessEnv, no
   console.log(`wrote: ${path}`);
   const reload = systemctl(env, ["daemon-reload"]);
   console.log(`${reload.ok ? "reloaded" : "not reloaded"}: systemctl --user daemon-reload`);
-  const enable = systemctl(env, ["enable", "--now", DAEMON_UNIT_NAME]);
-  console.log(`${enable.ok ? "started" : "not started"}: systemctl --user enable --now ${DAEMON_UNIT_NAME}${enable.line ? " (" + enable.line + ")" : ""}`);
-  return enable.ok ? EXIT_OK : EXIT_FAIL;
+  const enable = systemctl(env, ["enable", DAEMON_UNIT_NAME]);
+  console.log(`${enable.ok ? "enabled" : "not enabled"}: systemctl --user enable ${DAEMON_UNIT_NAME}${enable.line ? " (" + enable.line + ")" : ""}`);
+  // restart, not enable --now: a unit that is already running would keep the OLD config
+  // (a new port or bundle path must take effect on the next --install, A26-r3)
+  const restart = systemctl(env, ["restart", DAEMON_UNIT_NAME]);
+  console.log(`${restart.ok ? "started" : "not started"}: systemctl --user restart ${DAEMON_UNIT_NAME}${restart.line ? " (" + restart.line + ")" : ""}`);
+  return enable.ok && restart.ok ? EXIT_OK : EXIT_FAIL;
 }
 
 // ---- the daemon ----
@@ -348,6 +370,19 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv): Promi
   });
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Loopback is the trust boundary, so the Host must name it (a DNS-rebinding page points a
+    // name at 127.0.0.1) and a browser Origin is refused outright (MCP clients send none).
+    // hostname only: the port in Host varies (e.g. --port 0 binds a random one), and rebinding
+    // protection is about the NAME pointing here, not the port
+    const host = (req.headers.host ?? "").replace(/:\d+$/, "");
+    if (host !== DAEMON_HOST && host !== "localhost") {
+      res.writeHead(421, { "content-type": "text/plain" }).end("misdirected request: the daemon answers loopback only\n");
+      return;
+    }
+    if (req.headers.origin !== undefined) {
+      res.writeHead(403, { "content-type": "text/plain" }).end("origin not allowed\n");
+      return;
+    }
     if (req.method === "GET" && req.url === DAEMON_HEALTH_PATH) {
       res.writeHead(204).end();
       return;
@@ -377,6 +412,11 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv): Promi
   const stop = (): void => {
     core.shutdown();
     void modern.close().catch(() => {});
+    // every open session goes down with the daemon: a client holding an SSE GET would keep
+    // http.close() pending forever, and each session's server holds resources (ADR-0026 d6)
+    for (const [, entry] of sessions) void entry.server.close().catch(() => {});
+    sessions.clear();
+    http.closeAllConnections?.();
     http.close(() => {});
     setTimeout(() => process.exit(0), 2000).unref(); // a wedged connection never blocks the stop
   };
@@ -389,6 +429,9 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv): Promi
     close: async () => {
       core.shutdown();
       await modern.close().catch(() => {});
+      for (const [, entry] of sessions) await entry.server.close().catch(() => {});
+      sessions.clear();
+      http.closeAllConnections?.();
       await new Promise<void>((resolve) => http.close(() => resolve()));
     },
   };

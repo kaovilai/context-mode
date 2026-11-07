@@ -12,10 +12,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { createServer, request } from "node:http";
 import { parseDaemonArgs, daemonUnitText } from "../src/entries/daemon.ts";
 import { route } from "../src/entries/cli.ts";
 import { HELP_MAIN } from "../src/cli/args.ts";
 import { checkDaemon } from "../src/core/ops/doctor-env.ts";
+import { isAbsoluteWorkspacePath } from "../src/entries/daemon.ts";
 import { DAEMON_ADD_COMMAND, DAEMON_CHECK_FIX, DAEMON_DEFAULT_PORT, DAEMON_PORT_ENV } from "../src/core/contracts/constants.ts";
 
 const REPO = join(import.meta.dirname, "..");
@@ -46,10 +48,15 @@ describe("ADR-0026 daemon flags and unit", { concurrency: CONC }, () => {
 
   test("daemonUnitText: loopback daemon unit with Restart=on-failure and the port env", () => {
     const unit = daemonUnitText("/usr/bin/node", "/opt/cm/daemon.mjs", 8790);
-    assert.ok(unit.includes("ExecStart=/usr/bin/node /opt/cm/daemon.mjs"));
+    assert.ok(unit.includes('ExecStart="/usr/bin/node" "/opt/cm/daemon.mjs"'));
     assert.ok(unit.includes("Restart=on-failure"));
-    assert.ok(unit.includes(`Environment=${DAEMON_PORT_ENV}=8790`));
+    assert.ok(unit.includes(`Environment="${DAEMON_PORT_ENV}=8790"`));
     assert.ok(unit.includes("WantedBy=default.target"));
+  });
+
+  test("daemonUnitText quotes paths with spaces (an npm prefix like /home/u/context mode)", () => {
+    const unit = daemonUnitText("/home/u/context mode/node", "/home/u/context mode/daemon.mjs", 8790);
+    assert.ok(unit.includes('ExecStart="/home/u/context mode/node" "/home/u/context mode/daemon.mjs"'));
   });
 
   test("the CLI routes daemon to the daemon bundle; server/mcp stay stdio; help names daemon", () => {
@@ -169,7 +176,8 @@ describe("ADR-0026 one daemon, many sessions", () => {
     await b.close();
   });
 
-  test("exactly one daemon process serves every session, RSS flat in the session count", async () => {
+  test("exactly one daemon process serves every session, RSS flat in the session count", { skip: process.platform !== "linux" }, async () => {
+    // /proc exists only on Linux; the count assertion below still runs everywhere
     const rssKb = () => Number(readFileSync(join("/proc", String(child.pid), "status"), "utf8").split("\n").find((l) => l.startsWith("VmRSS:"))?.replace(/[^0-9]/g, "") ?? NaN);
     const before = rssKb();
     const clients = [];
@@ -231,5 +239,131 @@ describe("ADR-0026 one daemon, many sessions", () => {
     const tools = await client.request("tools/list", {});
     assert.equal(tools.tools.length, 9);
     await client.close();
+  });
+});
+
+
+describe("A26 review round 1", { concurrency: false }, () => {
+  let proc;
+  let root;
+  let repo;
+  let bundleDir;
+  let oldHome;
+
+  before(() => {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), "cm-daemon-r1-")));
+    repo = join(root, "repo");
+    mkdirSync(repo);
+    oldHome = process.env.HOME;
+    process.env.HOME = root;
+    process.env.USERPROFILE = root;
+    bundleDir = join(root, "bundle");
+    const r = spawnSync(process.execPath, [join(REPO, "build", "build.mjs"), "--out", bundleDir], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  });
+
+  after(() => {
+    process.env.HOME = oldHome;
+    process.env.USERPROFILE = oldHome;
+    proc?.kill("SIGTERM");
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    } catch (err) {
+      if (err.code !== "EPERM") throw err;
+    }
+  });
+
+  async function spawnDaemon() {
+    proc?.kill("SIGTERM"); // only the last spawn is killed by after(); earlier ones die here
+    proc = spawn(process.execPath, [join(bundleDir, "daemon.mjs"), "--port", "0"], {
+      env: { ...process.env, HOME: root, USERPROFILE: root },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let banner = "";
+    const url = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("daemon did not print its banner: " + banner)), 20000);
+      proc.stdout.setEncoding("utf8");
+      proc.stdout.on("data", (chunk) => {
+        banner += chunk;
+        const line = banner.split("\n").find((l) => l.startsWith("context-mode daemon listening on "));
+        if (line !== undefined) { clearTimeout(timer); resolve(line.slice("context-mode daemon listening on ".length)); }
+      });
+      proc.once("exit", (code) => reject(new Error("daemon exited before the banner (code " + code + ")")));
+    });
+    return url;
+  }
+
+  test("D12 FAILs when something else answers the port (a 404 or 500 is not a healthy daemon)", async () => {
+    const other = createServer((req, res) => { res.writeHead(404).end(); });
+    await new Promise((r) => other.listen(0, "127.0.0.1", r));
+    const port = other.address().port;
+    try {
+      const row = await checkDaemon({ [DAEMON_PORT_ENV]: String(port) });
+      assert.ok(row !== undefined && row.status === "FAIL", JSON.stringify(row));
+      assert.ok(row.detail.includes("404"), row.detail);
+      assert.equal(row.fixCommand, DAEMON_CHECK_FIX);
+    } finally {
+      other.close();
+      other.closeAllConnections?.();
+    }
+  });
+
+  test("the daemon refuses a foreign Host (DNS rebinding) and any Origin (browsers)", async () => {
+    const url = await spawnDaemon();
+    // fetch cannot override Host (a forbidden header), so the rebinding probe is a raw request
+    const foreign = await new Promise((resolve, reject) => {
+      const u = new URL(url);
+      const r = request({ host: u.hostname, port: Number(u.port), path: u.pathname, method: "POST", headers: { host: "evil.example", "content-type": "application/json" }, setHost: false }, (res) => { res.resume(); resolve(res.statusCode); });
+      r.on("error", reject);
+      r.end("{}");
+    });
+    assert.equal(foreign, 421);
+    const browser = await fetch(url, { headers: { origin: "https://evil.example" } });
+    assert.equal(browser.status, 403);
+    // and loopback Host still works (the health probe)
+    const health = await fetch(url.replace(/\/mcp$/, "/healthz"), { redirect: "manual" });
+    assert.equal(health.status, 204);
+  });
+
+  test("systemctl failure is a line, not a crash (hosts without systemd)", async () => {
+    const url = await spawnDaemon(); // ensure the bundle exists
+    assert.ok(url.length > 0);
+    const r = spawnSync(process.execPath, [join(bundleDir, "daemon.mjs"), "--install"], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: root, USERPROFILE: root, PATH: "" }, // no systemctl anywhere
+    });
+    assert.equal(r.status, 1, r.stdout + r.stderr); // EXIT_FAIL: reported, not crashed
+    assert.ok((r.stdout + r.stderr).includes("not started"), r.stdout + r.stderr);
+    assert.ok(!/TypeError|at /u.test(r.stderr), r.stderr);
+  });
+
+  test("isAbsoluteWorkspacePath: POSIX, Windows drive and UNC pass; relative and bare words do not", () => {
+    for (const good of ["/home/u/repo", "/tmp/x", "C:\\work\\repo", "D:/repo", "\\\\server\\\\share\\\\repo"]) {
+      assert.ok(isAbsoluteWorkspacePath(good), good);
+    }
+    for (const bad of ["repo", "./repo", "../repo", "repo/x", ""]) {
+      assert.ok(!isAbsoluteWorkspacePath(bad), bad);
+    }
+  });
+
+  test("the session header separates two clients on one daemon", async () => {
+    const url = await spawnDaemon();
+    const mk = async (session) => {
+      const client = new Client({ name: "claude-code", version: "2.1.303" });
+      const transport = new StreamableHTTPClientTransport(new URL(url), {
+        requestInit: { headers: { "x-context-mode-workspace": repo, "x-context-mode-session": session } },
+      });
+      await client.connect(transport);
+      return { client, call: (name, args) => client.callTool({ name, arguments: args }) };
+    };
+    const a = await mk("host-session-A");
+    await a.call("ctx_index", { content: "session header A marker albatross" });
+    const b = await mk("host-session-B");
+    const own = await b.call("ctx_search", { queries: ["albatross"], scope: "session" });
+    assert.ok(JSON.stringify(own.content).includes("No hits"), "session B must not see session header A rows");
+    const viaHeader = await a.call("ctx_search", { queries: ["albatross"], scope: "session" });
+    assert.ok(JSON.stringify(viaHeader.content).includes("albatross"), "session A must see its own rows via the header id");
+    await a.client.close();
+    await b.client.close();
   });
 });
