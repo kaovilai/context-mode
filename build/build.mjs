@@ -56,6 +56,8 @@ const COMMAND_SKILLS = Object.freeze(["ctx-stats", "ctx-doctor", "ctx-upgrade"])
 // run.mjs and search.mjs are one entry; the file name picks the job (D-M3-X1-2).
 const BUNDLES = Object.freeze([
   { name: "server", entry: "src/entries/server.ts", out: "server.mjs" },
+  // ADR-0026: the shared daemon; one process serves every session over loopback Streamable HTTP.
+  { name: "daemon", entry: "src/entries/daemon.ts", out: "daemon.mjs" },
   // D-CI-PERF-3: the hook is spawned once per tool call, so its parse+compile time is on every call; minified.
   { name: "hook", entry: "src/entries/hook.ts", out: "hook.mjs", minify: true },
   { name: "run", entry: "src/entries/run.ts", out: "run.mjs" },

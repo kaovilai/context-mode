@@ -7,7 +7,7 @@ import { basename, dirname, join } from "node:path";
 import { z } from "zod/v4";
 import { getAdapter } from "../../adapters/table.ts";
 import {
-  D5_LAST_HOOK_ERROR, D5_PAST_HOOK_ERROR, DOCTOR_CHECK_ORDER, DOCTOR_DOCS_LABEL, DOCTOR_DOCS_LINK, DOCTOR_LABEL, OWNER_PID_EXT, OWNERS_DIR_NAME,
+  D5_LAST_HOOK_ERROR, D5_PAST_HOOK_ERROR, DAEMON_CHECK_LABEL, DOCTOR_CHECK_ORDER, DOCTOR_DOCS_LABEL, DOCTOR_DOCS_LINK, DOCTOR_LABEL, OWNER_PID_EXT, OWNERS_DIR_NAME,
   NATIVE_INSTALL, PI_LIST_COMMAND, PROJECTS_DIR_NAME, REPORT_ENV_ENUMS, BUNDLE_SHA, D1_REGISTRY_URL, DOCTOR_GIT_TIMEOUT_MS, REPORT_CAP, REPORT_SOURCE_LABEL,
 } from "../contracts/constants.ts";
 import { CtxError } from "../contracts/errors.ts";
@@ -18,7 +18,7 @@ import { ownBundleDir } from "../ops/bundle-dir.ts";
 import { checkDoubleFire, checkHostConfig, checkV1Leftovers } from "../ops/doctor-config.ts";
 import { checkDb, checkIndex } from "../ops/doctor-db.ts";
 import type { DbCheck } from "../ops/doctor-db.ts";
-import { bundleVersion, checkMcp, checkMode, checkNode, checkProject, checkShell, checkVersion } from "../ops/doctor-env.ts";
+import { bundleVersion, checkDaemon, checkMcp, checkMode, checkNode, checkProject, checkShell, checkVersion } from "../ops/doctor-env.ts";
 import { checkHookRoundTrip } from "../ops/doctor-hook.ts";
 import { lastHookError } from "../hooks/fallback.ts";
 import { healD8, healOrphan } from "../ops/db-heal.ts";
@@ -47,7 +47,7 @@ function lineOf(err: unknown): string {
 }
 
 // ADR-0010 "doctor always answers": a check that throws is reported as UNKNOWN with its cause (D-M5-D6-2).
-async function guard(id: DoctorCheckId, run: () => DoctorRow | Promise<DoctorRow>): Promise<DoctorRow> {
+async function guard(id: Exclude<DoctorCheckId, "D12">, run: () => DoctorRow | Promise<DoctorRow>): Promise<DoctorRow> {
   try {
     return await run();
   } catch (err) {
@@ -109,7 +109,7 @@ export async function runDoctorChecks(ctx: ToolContext, adapter: AdapterRow, hos
   const project = ctx.project;
   let integrityFailed = false;
   let orphan: DbCheck["orphan"] = [];
-  const checks: Record<DoctorCheckId, () => DoctorRow | Promise<DoctorRow>> = {
+  const checks: Record<Exclude<DoctorCheckId, "D12">, () => DoctorRow | Promise<DoctorRow>> = {
     D1: () => checkVersion({ bundleSha: BUNDLE_SHA, version: bundleVersion(host.bundleDir), registryUrl: D1_REGISTRY_URL, timeoutMs: DOCTOR_GIT_TIMEOUT_MS, env: buildChildEnv(env), cwd: project.worktree, signal: ctx.signal }),
     D2: () => checkNode({ nodeVersion: process.version, bunVersion: process.versions.bun }),
     D3: () => checkHostConfig(adapter, env, project.worktree),
@@ -130,6 +130,15 @@ export async function runDoctorChecks(ctx: ToolContext, adapter: AdapterRow, hos
   };
   const rows: DoctorRow[] = [];
   for (const id of DOCTOR_CHECK_ORDER) rows.push(await guard(id, checks[id]));
+  // ADR-0026 D12: appended after the fixed order, and only when it applies (this process is the
+  // daemon, or CONTEXT_MODE_DAEMON_PORT names a port); a plain stdio session shows no D12 row.
+  let daemonRow: DoctorRow | undefined;
+  try {
+    daemonRow = await checkDaemon(env);
+  } catch (err) {
+    daemonRow = { id: "D12", label: DAEMON_CHECK_LABEL, status: "UNKNOWN", detail: lineOf(err) };
+  }
+  if (daemonRow !== undefined) rows.push(daemonRow);
   const at = DOCTOR_CHECK_ORDER.indexOf("D8");
   // D-ORPHAN-WAL-1: a missing context.db with its WAL left: move the WAL files aside, start a new index.
   if (orphan.length > 0) {

@@ -32,6 +32,7 @@ function devMeta(): DevMeta {
 }
 const NODE_COMMAND = "node";
 const SERVER_BUNDLE = "server.mjs";
+const DAEMON_BUNDLE = "daemon.mjs"; // ADR-0026: the shared daemon entry, shipped next to the server bundle
 const HOOK_BUNDLE = "hook.mjs";
 const AGENT_FLAG = "--agent";
 const MS_PER_SECOND = 1000;
@@ -237,7 +238,7 @@ const NODE_ENGINE = ">=" + NODE_MIN; // D1, the runtime check constant (D-PKG-ME
 // D1 "files = the release tree": every top-level name build.mjs writes, except package.json (npm always packs it).
 // build.mjs assertOutTree fails the build when the real tree and this list differ.
 export const OUT_FILES: readonly string[] = [
-  ".claude-plugin", CODEX_PLUGIN_DIR, ZCODE_PLUGIN_DIR, CLI_BUNDLE, "codex", "copilot", "fixtures", "gemini-extension.json", HOOK_BUNDLE, HOOKS_DIR, "opencode", "pi",
+  ".claude-plugin", CODEX_PLUGIN_DIR, ZCODE_PLUGIN_DIR, CLI_BUNDLE, "codex", "copilot", DAEMON_BUNDLE, "fixtures", "gemini-extension.json", HOOK_BUNDLE, HOOKS_DIR, "opencode", "pi",
   "qwen-extension.json", "run.mjs", "search.mjs", SERVER_BUNDLE, "skills", RELEASE_SUMS_FILE, "README.md", "LICENSE", // D-NPM-README-1
 ].slice().sort();
 // D-RN-REPO-1: npm provenance rejects a publish (E422) unless repository.url names the source repo. This is the
