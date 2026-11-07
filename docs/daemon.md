@@ -69,7 +69,8 @@ project indexed.
 
 The daemon names a session by, in order: the request's `_meta.sessionId`, the
 `x-context-mode-session` header, the transport session id (`mcp-session-id`, one per connection).
-A client that sends none of these shares the process-wide fallback id.
+A request that sends none of these gets a fresh id per request (its session-scoped rows are
+write-only, never pooled).
 
 Two consequences to know:
 
