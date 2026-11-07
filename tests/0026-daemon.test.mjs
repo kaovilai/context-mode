@@ -380,6 +380,17 @@ describe("A26 review round 1", { concurrency: false }, () => {
     proc = undefined; // already dead; after() must not kill it again
   });
 
+  test("--install with no HOME is a line, not a stack trace (A26-r10)", async () => {
+    await spawnDaemon(); // ensure the bundle exists
+    const r = spawnSync(process.execPath, [join(bundleDir, "daemon.mjs"), "--install"], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: "", USERPROFILE: "" },
+    });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.ok((r.stdout + r.stderr).includes("not written"), r.stdout + r.stderr);
+    assert.ok(!/TypeError|at /u.test(r.stderr), r.stderr);
+  });
+
   test("isAbsoluteWorkspacePath: POSIX, Windows drive and UNC pass; relative and bare words do not", () => {
     for (const good of ["/home/u/repo", "/tmp/x", "C:\\work\\repo", "D:/repo", "\\\\server\\\\share\\\\repo"]) {
       assert.ok(isAbsoluteWorkspacePath(good), good);

@@ -291,7 +291,15 @@ function systemctl(env: NodeJS.ProcessEnv, args: string[]): { ok: boolean; line:
 
 /** --install / --remove: one line per action, the setup print conventions (no paths typed by hand). */
 export function runDaemonUnitAction(args: DaemonArgs, env: NodeJS.ProcessEnv, nodeBin: string, daemonBundle: string): number {
-  const path = unitPath(env);
+  // --install writes files in $HOME/.config: a missing HOME or a read-only config dir must be a
+  // "not written" line and EXIT_FAIL, never a stack trace (--remove already handles its errors)
+  let path: string;
+  try {
+    path = unitPath(env);
+  } catch (err) {
+    console.log(`not written: ${(err as Error).message}`);
+    return EXIT_FAIL;
+  }
   if (args.remove === true) {
     const stop = systemctl(env, ["disable", "--now", DAEMON_UNIT_NAME]);
     console.log(`${stop.ok ? "stopped" : "not stopped"}: systemctl --user disable --now ${DAEMON_UNIT_NAME}${stop.line ? " (" + stop.line + ")" : ""}`);
@@ -305,9 +313,14 @@ export function runDaemonUnitAction(args: DaemonArgs, env: NodeJS.ProcessEnv, no
     console.log(`${reload.ok ? "reloaded" : "not reloaded"}: systemctl --user daemon-reload`);
     return EXIT_OK;
   }
-  mkdirSync(join(path, ".."), { recursive: true });
-  writeFileSync(path, daemonUnitText(nodeBin, daemonBundle, args.port) + "\n");
-  console.log(`wrote: ${path}`);
+  try {
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, daemonUnitText(nodeBin, daemonBundle, args.port) + "\n");
+    console.log(`wrote: ${path}`);
+  } catch (err) {
+    console.log(`not written: ${path} (${(err as Error).message})`);
+    return EXIT_FAIL;
+  }
   const reload = systemctl(env, ["daemon-reload"]);
   console.log(`${reload.ok ? "reloaded" : "not reloaded"}: systemctl --user daemon-reload`);
   const enable = systemctl(env, ["enable", DAEMON_UNIT_NAME]);
