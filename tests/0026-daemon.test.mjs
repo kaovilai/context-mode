@@ -18,7 +18,7 @@ import { route } from "../src/entries/cli.ts";
 import { HELP_MAIN } from "../src/cli/args.ts";
 import { checkDaemon } from "../src/core/ops/doctor-env.ts";
 import { isAbsoluteWorkspacePath } from "../src/entries/daemon.ts";
-import { DAEMON_ADD_COMMAND, DAEMON_CHECK_FIX, DAEMON_DEFAULT_PORT, DAEMON_PORT_ENV } from "../src/core/contracts/constants.ts";
+import { DAEMON_ADD_COMMAND, DAEMON_CHECK_FIX, DAEMON_DEFAULT_PORT, DAEMON_PORT_ENV, DAEMON_SESSION_HEADER } from "../src/core/contracts/constants.ts";
 
 const REPO = join(import.meta.dirname, "..");
 
@@ -335,6 +335,39 @@ describe("A26 review round 1", { concurrency: false }, () => {
     assert.equal(r.status, 1, r.stdout + r.stderr); // EXIT_FAIL: reported, not crashed
     assert.ok((r.stdout + r.stderr).includes("not started"), r.stdout + r.stderr);
     assert.ok(!/TypeError|at /u.test(r.stderr), r.stderr);
+  });
+
+  test("an unidentified request never pools into the process session (A26-r6)", async () => {
+    const { daemonRouting } = await import("../src/entries/daemon.ts");
+    const core = { serverId: "mcp:proc", createMcpServer: () => { throw new Error("unused"); } };
+    const routing = daemonRouting([], process.env, core);
+    const anonReq = () => ({ http: { req: { headers: new Headers() } }, sessionId: undefined });
+    const a = routing.fallbackIdOf(anonReq());
+    const b = routing.fallbackIdOf(anonReq());
+    assert.notEqual(a, core.serverId, "the process id must not be the anonymous fallback");
+    assert.notEqual(a, b, "two unidentified requests must not share a session id");
+    assert.ok(a.startsWith("anon-") && b.startsWith("anon-"), `${a} ${b}`);
+    const withHeader = { http: { req: { headers: new Headers({ [DAEMON_SESSION_HEADER]: "host-1" }) } }, sessionId: undefined };
+    assert.equal(routing.fallbackIdOf(withHeader), "host-1");
+    const withTransport = { http: { req: { headers: new Headers() } }, sessionId: "transport-1" };
+    assert.equal(routing.fallbackIdOf(withTransport), "transport-1");
+  });
+
+  test("SIGTERM during an in-flight tool call exits cleanly (A26-r7: core shuts down last)", async () => {
+    const url = await spawnDaemon();
+    const client = new Client({ name: "claude-code", version: "2.1.303" });
+    const transport = new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { "x-context-mode-workspace": repo } },
+    });
+    await client.connect(transport);
+    const slow = client.callTool({ name: "ctx_execute", arguments: { language: "bash", code: "sleep 1" } }).catch(() => "cut");
+    await new Promise((r) => setTimeout(r, 150));
+    proc.kill("SIGTERM");
+    await slow;
+    const code = await new Promise((resolve) => { proc.once("exit", (c) => resolve(c)); if (proc.exitCode !== null) resolve(proc.exitCode); });
+    assert.equal(code, 0, "the daemon must exit 0 on SIGTERM with a call in flight");
+    await client.close();
+    proc = undefined; // already dead; after() must not kill it again
   });
 
   test("isAbsoluteWorkspacePath: POSIX, Windows drive and UNC pass; relative and bare words do not", () => {

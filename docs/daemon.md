@@ -79,8 +79,9 @@ Two consequences to know:
   (`--header "x-context-mode-session: $CLAUDE_CODE_SESSION_ID"` in a config that expands it per
   session). Claude Code's `claude mcp add` headers are static, so until it grows dynamic headers,
   session-scoped hook continuity keeps requiring the stdio spawn; project scope is unaffected.
-- Clients that cannot be told apart at all fall back to one shared id: their `scope: "session"`
-  rows pool. Sending `_meta.sessionId` (most SDK clients can) or the header keeps them separate.
+- A request with no identity at all gets a fresh id per request: its `scope: "session"` rows are
+  write-only (it cannot even read back its own), but two unidentified clients can never see each
+  other's rows. Sending `_meta.sessionId` (most SDK clients can) or the header restores continuity.
 
 ## Check it
 

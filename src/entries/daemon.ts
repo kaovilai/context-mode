@@ -173,8 +173,12 @@ export function daemonRouting(argv: string[], env: NodeJS.ProcessEnv, core: Serv
     envOf: () => scrubbed,
     // Session identity for a shared process: the HOST session id when the client can set
     // per-session headers (it matches the id its hooks journal under, so scope:"session" finds
-    // hook-indexed rows), else the transport session (one per connection), never the process id.
-    fallbackIdOf: (req) => req.http?.req?.headers.get(DAEMON_SESSION_HEADER) ?? req.sessionId ?? core.serverId,
+    // hook-indexed rows), else the transport session (one per connection). A request with NO
+    // identity gets a fresh id per request: its session-scoped rows are write-only, but two
+    // unidentified clients can never see each other's rows (A26-r6) — the process id must never
+    // be the fallback, it pools every anonymous client into one session.
+    fallbackIdOf: (req) =>
+      req.http?.req?.headers.get(DAEMON_SESSION_HEADER) ?? req.sessionId ?? "anon-" + randomUUID(),
   };
 }
 
@@ -319,7 +323,7 @@ export interface DaemonHandle {
 }
 
 /** Start the daemon; resolves when the listener is bound (the banner and tests read handle.url). */
-export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv): Promise<DaemonHandle> {
+export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStopped?: () => void): Promise<DaemonHandle> {
   const core = await createServerCore(argv, env);
   const routing = daemonRouting(argv, env, core);
   const args = parseDaemonArgs(argv, env);
@@ -410,15 +414,19 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv): Promi
   // systemd stops the unit with SIGTERM; a foreground Ctrl-C is SIGINT. Both take the stdio shutdown
   // path (removeOwnerPid, closeDb, D-M5-R1-1 stop marker), then let the loop empty (impl/11 §4 steps 2-3).
   const stop = (): void => {
-    core.shutdown();
+    // Order matters (A26-r7): stop accepting, settle the transports (in-flight requests finish
+    // or fail against a live server), and only then close the databases the requests use.
+    http.close(() => {});
     void modern.close().catch(() => {});
-    // every open session goes down with the daemon: a client holding an SSE GET would keep
-    // http.close() pending forever, and each session's server holds resources (ADR-0026 d6)
     for (const [, entry] of sessions) void entry.server.close().catch(() => {});
     sessions.clear();
-    http.closeAllConnections?.();
-    http.close(() => {});
-    setTimeout(() => process.exit(0), 2000).unref(); // a wedged connection never blocks the stop
+    core.shutdown();
+    http.closeAllConnections?.(); // a wedged SSE stream never blocks the stop
+    // settle the entry's top-level await FIRST: process.exit() over a pending TLA is exit
+    // code 13 ("unsettled top-level await"), not 0 (A26-r7). With it settled, the loop
+    // drains and node exits 0 on its own; the timer is only the wedged-connection backstop.
+    onStopped?.();
+    setTimeout(() => process.exit(0), 2000).unref();
   };
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
@@ -427,12 +435,12 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv): Promi
     port: boundPort,
     url: `http://${DAEMON_HOST}:${boundPort}${DAEMON_PATH}`,
     close: async () => {
-      core.shutdown();
+      await new Promise<void>((resolve) => http.close(() => resolve()));
       await modern.close().catch(() => {});
       for (const [, entry] of sessions) await entry.server.close().catch(() => {});
       sessions.clear();
+      core.shutdown();
       http.closeAllConnections?.();
-      await new Promise<void>((resolve) => http.close(() => resolve()));
     },
   };
 }
@@ -462,8 +470,10 @@ async function main(): Promise<void> {
     return;
   }
   let handle: DaemonHandle;
+  let stopped: (() => void) | undefined;
+  const stoppedOnce = new Promise<void>((resolve) => { stopped = resolve; });
   try {
-    handle = await startDaemon(process.argv.slice(2), process.env);
+    handle = await startDaemon(process.argv.slice(2), process.env, stopped);
   } catch (err) {
     process.stderr.write(`context-mode daemon: ${(err as Error).message}\n`);
     process.exit(EXIT_FAIL);
@@ -472,7 +482,7 @@ async function main(): Promise<void> {
   // channel here, so it is safe to write to.
   process.stdout.write(`context-mode daemon listening on ${handle.url}\n`);
   process.stdout.write(DAEMON_ADD_COMMAND(handle.url) + "\n");
-  await new Promise<void>((resolve) => process.once("exit", () => resolve()));
+  await stoppedOnce; // stop() settles this after its cleanup; the loop then drains to exit 0
 }
 
 if (isEntry(import.meta.main, process.argv[1], fileURLToPath(import.meta.url))) await main();
