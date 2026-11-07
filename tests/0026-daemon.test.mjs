@@ -352,6 +352,9 @@ describe("A26 review round 1", { concurrency: false }, () => {
     assert.equal(routing.fallbackIdOf(withHeader), "host-1");
     // unprefixed through sessionIdOf: the whole point is to equal the hooks' host id (A26-r8)
     assert.equal(sessionIdOf(undefined, "claude-code", {}, routing.fallbackIdOf(withHeader)), "host-1");
+    // an EMPTY header is absent (A26-r11): Headers.get returns "", and ?? alone would pass it
+    const emptyHeader = { http: { req: { headers: new Headers({ [DAEMON_SESSION_HEADER]: "" }) } }, sessionId: "transport-1" };
+    assert.equal(routing.fallbackIdOf(emptyHeader), "transport-1");
     // a hostile header value is ignored, never a journal key (A26-r9)
     for (const bad of ["has space", "x".repeat(129), ";; rm -rf", "drop;table"]) {
       const hostile = { http: { req: { headers: new Headers({ [DAEMON_SESSION_HEADER]: bad }) } }, sessionId: "transport-1" };
@@ -370,7 +373,7 @@ describe("A26 review round 1", { concurrency: false }, () => {
       requestInit: { headers: { "x-context-mode-workspace": repo } },
     });
     await client.connect(transport);
-    const slow = client.callTool({ name: "ctx_execute", arguments: { language: "bash", code: "sleep 1" } }).catch(() => "cut");
+    const slow = client.callTool({ name: "ctx_index", arguments: { content: "in-flight database write " + "x".repeat(200000) } }).catch(() => "cut");
     await new Promise((r) => setTimeout(r, 150));
     proc.kill("SIGTERM");
     await slow;
@@ -378,6 +381,21 @@ describe("A26 review round 1", { concurrency: false }, () => {
     assert.equal(code, 0, "the daemon must exit 0 on SIGTERM with a call in flight");
     await client.close();
     proc = undefined; // already dead; after() must not kill it again
+  });
+
+  test("close() resolves with an open SSE stream (A26-r11: connections drop before the close wait)", async () => {
+    const { startDaemon } = await import("../src/entries/daemon.ts");
+    const handle = await startDaemon([], { ...process.env, HOME: root, USERPROFILE: root });
+    const client = new Client({ name: "claude-code", version: "2.1.303" });
+    const transport = new StreamableHTTPClientTransport(new URL(handle.url), {
+      requestInit: { headers: { "x-context-mode-workspace": repo } },
+    });
+    await client.connect(transport); // the 2025 transport holds an open SSE GET stream
+    await Promise.race([
+      handle.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("close() hung on the open SSE stream")), 8000)),
+    ]);
+    await client.close().catch(() => {});
   });
 
   test("--install with no HOME is a line, not a stack trace (A26-r10)", async () => {

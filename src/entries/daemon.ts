@@ -437,19 +437,23 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
   // systemd stops the unit with SIGTERM; a foreground Ctrl-C is SIGINT. Both take the stdio shutdown
   // path (removeOwnerPid, closeDb, D-M5-R1-1 stop marker), then let the loop empty (impl/11 §4 steps 2-3).
   const stop = (): void => {
-    // Order matters (A26-r7): stop accepting, settle the transports (in-flight requests finish
-    // or fail against a live server), and only then close the databases the requests use.
-    http.close(() => {});
-    void modern.close().catch(() => {});
-    for (const [, entry] of sessions) void entry.server.close().catch(() => {});
-    sessions.clear();
-    core.shutdown();
-    http.closeAllConnections?.(); // a wedged SSE stream never blocks the stop
-    // settle the entry's top-level await FIRST: process.exit() over a pending TLA is exit
-    // code 13 ("unsettled top-level await"), not 0 (A26-r7). With it settled, the loop
-    // drains and node exits 0 on its own; the timer is only the wedged-connection backstop.
-    onStopped?.();
-    setTimeout(() => process.exit(0), 2000).unref();
+    // Order matters (A26-r7): stop accepting, AWAIT the transports settling (in-flight requests
+    // finish or fail against a live server), and only then close the databases they use.
+    void (async () => {
+      http.close(() => {});
+      await Promise.allSettled([
+        modern.close().catch(() => {}),
+        ...[...sessions.values()].map((entry) => entry.server.close().catch(() => {})),
+      ]);
+      sessions.clear();
+      core.shutdown();
+      http.closeAllConnections?.(); // a wedged SSE stream never blocks the stop
+      // settle the entry's top-level await: process.exit() over a pending TLA is exit
+      // code 13 ("unsettled top-level await"), not 0. With it settled, the loop drains
+      // and node exits 0 on its own; the timer is only the wedged-connection backstop.
+      onStopped?.();
+      setTimeout(() => process.exit(0), 2000).unref();
+    })();
   };
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
@@ -458,12 +462,16 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
     port: boundPort,
     url: `http://${DAEMON_HOST}:${boundPort}${DAEMON_PATH}`,
     close: async () => {
-      await new Promise<void>((resolve) => http.close(() => resolve()));
-      await modern.close().catch(() => {});
-      for (const [, entry] of sessions) await entry.server.close().catch(() => {});
+      // connections drop BEFORE the http.close callback is awaited: an open SSE stream
+      // keeps that callback pending forever (A26-r11)
+      await Promise.allSettled([
+        modern.close().catch(() => {}),
+        ...[...sessions.values()].map((entry) => entry.server.close().catch(() => {})),
+      ]);
       sessions.clear();
       core.shutdown();
       http.closeAllConnections?.();
+      await new Promise<void>((resolve) => http.close(() => resolve()));
     },
   };
 }
