@@ -1,0 +1,95 @@
+# Shared daemon: many sessions, one process
+
+By default every agent session starts its own context-mode MCP server (stdio). On a machine that runs
+many sessions at once — T3 Code threads, a stack of terminal tabs — that is RAM × sessions. The shared
+daemon is the opt-in fix: one process serves every session over loopback HTTP, so the cost stops
+scaling. See [ADR-0026](architecture/adr/0026-shared-http-daemon.md) for the design.
+
+The daemon is opt-in. Nothing changes until you run it: the stdio spawn stays the default.
+
+## What you need
+
+- The npm route: `npm i -g context-mode`, then `context-mode setup` (see the
+  [Install guide](https://contextmode.ai/docs/engine/install?utm_source=github&utm_medium=docs&utm_content=daemon)).
+- Node 24.15.0 or later, same as the plugin.
+
+## Start it (systemd)
+
+```sh
+context-mode daemon --install
+```
+
+That writes the user unit, enables and starts it. The unit binds `127.0.0.1:8790` (change it with
+`--port <n>` before `--install`, or the `CONTEXT_MODE_DAEMON_PORT` env), and restarts on failure.
+
+```sh
+systemctl --user status context-mode-daemon
+```
+
+Without systemd, run it in the foreground (the banner names the port it picked):
+
+```sh
+context-mode daemon
+```
+
+## Point one agent at it
+
+Copy the command the daemon printed at startup, or print it again:
+
+```sh
+context-mode daemon --print-command
+```
+
+```sh
+claude mcp add --transport http context-mode http://127.0.0.1:8790/mcp
+```
+
+Remove the entry to go back to the stdio spawn:
+
+```sh
+claude mcp remove context-mode
+```
+
+## One daemon, many projects
+
+Sessions of different projects share the daemon. A session that sends no workspace itself names its
+project in a header (run the command in the repo root; `claude mcp remove context-mode` first if the
+entry above exists):
+
+```sh
+claude mcp add --scope project --transport http context-mode \
+  http://127.0.0.1:8790/mcp --header "x-context-mode-workspace: $PWD"
+```
+
+Each session keeps its own session scope (a `scope: "session"` search never sees another session's
+rows); the project index is shared by design, so `scope: "project"` finds what any session of that
+project indexed.
+
+## Check it
+
+The daemon answers a liveness probe with no MCP traffic:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8790/healthz
+```
+
+`ctx_doctor` shows a `D12 daemon` row while you are connected through the daemon. To also check the
+daemon from stdio sessions, name its port in your shell profile:
+
+```sh
+export CONTEXT_MODE_DAEMON_PORT=8790
+```
+
+A down daemon is a FAIL with the fix `context-mode daemon --install`.
+
+## Stop it
+
+```sh
+context-mode daemon --remove
+```
+
+## Limits
+
+- The daemon has no inbound auth: it binds loopback only, like the stdio spawn trusts the local user.
+- `ctx_upgrade` with mode `uninstall` stops the whole daemon (one process owns the data it removes).
+- A session that dies without a clean close leaves a small in-memory entry until the daemon restarts.
