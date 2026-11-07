@@ -355,6 +355,24 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
   if ("error" in args) throw new Error(args.error);
   const port = args.port;
 
+  // A26-r13: set at the first moment of either shutdown path; handle() answers 503 while it is
+  // set, so a request riding an open keep-alive connection cannot start a tool call after the
+  // drain has already returned (http.close only stops NEW connections).
+  let stopping = false;
+  /** drain, bounded; the timer is cleared when the drain wins so a normal stop never waits
+   * for it (and the entry's exit is not held by a pending timer). */
+  const drainBounded = async (ms: number): Promise<void> => {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        core.drain(),
+        new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
+
   // 2026-07-28 era: one server per request from the same factory, no session state (the SDK's own entry).
   const modern = createMcpHandler(() => core.createMcpServer(routing), { legacy: "reject" });
 
@@ -399,6 +417,10 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
   });
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (stopping) {
+      res.writeHead(503, { "content-type": "text/plain" }).end("shutting down\n");
+      return;
+    }
     // Loopback is the trust boundary, so the Host must name it (a DNS-rebinding page points a
     // name at 127.0.0.1) and a browser Origin is refused outright (MCP clients send none).
     // hostname only: the port in Host varies (e.g. --port 0 binds a random one), and rebinding
@@ -445,9 +467,10 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
       // SDK's transport close ABORTS active requests without waiting for the handlers — closing
       // the transports first would cut the calls the drain is waiting for), then close the
       // transports, and only then the databases those handlers used.
+      stopping = true;
       setTimeout(() => process.exit(0), 2000).unref();
       http.close(() => {});
-      await Promise.race([core.drain(), new Promise<void>((r) => setTimeout(r, 1500))]);
+      await drainBounded(1500);
       // the handler promise resolving is the last thing the daemon controls: the SDK still has
       // to serialize and send the response afterwards, so give the flush a bounded window
       // before the transports go away (A26-r12)
@@ -477,8 +500,9 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
       // stand (the drain is bounded — a wedged handler cannot hang the close), then close the
       // transports, then the databases; connections drop before the close callback is awaited
       // (an open SSE stream keeps that callback pending forever, A26-r11).
+      stopping = true;
       http.close(() => {});
-      await Promise.race([core.drain(), new Promise<void>((r) => setTimeout(r, 4000))]);
+      await drainBounded(4000);
       // bounded response-flush window before the transports close (A26-r12)
       await new Promise((r) => setTimeout(r, 100));
       await Promise.allSettled([

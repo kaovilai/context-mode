@@ -335,7 +335,7 @@ describe("A26 review round 1", { concurrency: false }, () => {
     });
     assert.equal(r.status, 1, r.stdout + r.stderr); // EXIT_FAIL: reported, not crashed
     assert.ok((r.stdout + r.stderr).includes("not started"), r.stdout + r.stderr);
-    assert.ok(!/TypeError|at /u.test(r.stderr), r.stderr);
+    assert.ok(!/TypeError|^\s+at .+[(:]/mu.test(r.stderr), r.stderr);
   });
 
   test("an unidentified request never pools into the process session (A26-r6)", async () => {
@@ -375,9 +375,10 @@ describe("A26 review round 1", { concurrency: false }, () => {
     await client.connect(transport);
     const slow = client.callTool({ name: "ctx_index", arguments: { content: "in-flight database write " + "x".repeat(200000) } }).catch(() => "cut");
     await new Promise((r) => setTimeout(r, 150));
+    const exited = new Promise((resolve) => proc.once("exit", (c, sig) => resolve(c ?? sig)));
     proc.kill("SIGTERM");
     await slow;
-    const code = await new Promise((resolve) => { proc.once("exit", (c) => resolve(c)); if (proc.exitCode !== null) resolve(proc.exitCode); });
+    const code = await exited;
     assert.equal(code, 0, "the daemon must exit 0 on SIGTERM with a call in flight");
     await client.close();
     proc = undefined; // already dead; after() must not kill it again
@@ -391,10 +392,15 @@ describe("A26 review round 1", { concurrency: false }, () => {
       requestInit: { headers: { "x-context-mode-workspace": repo } },
     });
     await client.connect(transport); // the 2025 transport holds an open SSE GET stream
-    await Promise.race([
-      handle.close(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("close() hung on the open SSE stream")), 8000)),
-    ]);
+    let hung;
+    try {
+      await Promise.race([
+        handle.close(),
+        new Promise((_, reject) => { hung = setTimeout(() => reject(new Error("close() hung on the open SSE stream")), 8000); }),
+      ]);
+    } finally {
+      clearTimeout(hung);
+    }
     await client.close().catch(() => {});
   });
 
