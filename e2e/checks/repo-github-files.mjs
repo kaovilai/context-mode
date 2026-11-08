@@ -29,7 +29,11 @@ export function check() {
   }
   for (const f of readdirSync(path.join(GH, "workflows"))) {
     const src = read(path.join(GH, "workflows", f));
-    need(!/^\s*pull_request(_target)?\s*:/m.test(src), `workflows/${f} must have no pull_request trigger`);
+    // FORK ONLY: this fork keeps pull requests enabled (upstream disabled them, ADR-0014 §5),
+    // and the agentic-workflow-locks check must run on a PR that touches a workflow .md or a
+    // lock file before it can reach main
+    const forkPrAllowed = f === "agentic-workflow-locks.yml";
+    need(forkPrAllowed || !/^\s*pull_request(_target)?\s*:/m.test(src), `workflows/${f} must have no pull_request trigger`);
   }
 
   // bug.yml (§6.1)
