@@ -9,22 +9,26 @@ import {
   D1_GIT_NO_TAG, D1_GIT_TIMEOUT, D1_LATEST_AHEAD, D1_LATEST_PASS, D1_LATEST_UNKNOWN, D1_LATEST_UPDATE, D1_NO_VERSION, D1_NPM_CHECK_FIX,
   D1_NPM_ERROR, D1_NPM_HTTP, D1_NPM_NO_TAG, D1_NPM_TIMEOUT, D1_PACKAGE_FILE, D1_PREFIX, D1_PRERELEASE_SEP, D1_SOURCE_NPM, D1_SOURCE_TAGS,
   D10_DETAIL, D10_PERMISSION_DETAIL, D10_PERMISSION_FIX, D10_PERMISSION_MISSING_DETAIL, D11_PASS_DETAIL, D11_POSIX_DETAIL, D11_POSIX_FIX, D11_WIN_DETAIL, D11_WIN_FIX, D2_BUN_DETAIL, D2_NODE_DETAIL, D2_NODE_FIX,
-  D2_SQLITE_DETAIL, D2_SQLITE_FIX, D4_REASON_JOIN, D6_IN_PROCESS_DETAIL, D6_UNKNOWN_DETAIL, D7_DETAIL, D7_FIX, DOCTOR_FIX_UPGRADE,
-  DOCTOR_GIT_TIMEOUT_MS, DOCTOR_LABEL, DOCTOR_PASS_DETAIL, GIT_BIN, GIT_LS_REMOTE, GIT_LS_REMOTE_TAG_ARGS, GIT_NO_PROMPT_ENV, GIT_SHA_HEX_LEN,
+  D2_SQLITE_DETAIL, D2_SQLITE_FIX, D4_REASON_JOIN, D6_IN_PROCESS_DETAIL, D6_UNKNOWN_DETAIL, D7_DETAIL, D7_FIX, DAEMON_CHECK_DOWN_DETAIL, DAEMON_CHECK_FIX,
+  DAEMON_CHECK_LABEL, DAEMON_CHECK_PASS_DETAIL, DAEMON_CHECK_SELF_DETAIL, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PROBE_TIMEOUT_MS,
+  DOCTOR_FIX_UPGRADE, DOCTOR_GIT_TIMEOUT_MS, DOCTOR_LABEL, DOCTOR_PASS_DETAIL, GIT_BIN, GIT_LS_REMOTE, GIT_LS_REMOTE_TAG_ARGS, GIT_NO_PROMPT_ENV, GIT_SHA_HEX_LEN,
   LS_REMOTE_FIELD_SEP, NODE_MIN, NODE_VERSION_PREFIX, NODE_VERSION_SEP, RELEASE_REPO_URL, RELEASE_TAG_PATTERN, RELEASE_TAG_REF_PREFIX,
-  SQLITE_MODULE,
+  SQLITE_MODULE, daemonUrlOf,
 } from "../contracts/constants.ts";
+import { daemonCheckWanted, daemonConfiguredPort, daemonSelfPort } from "./daemon-state.ts";
 import type { AdapterRow, DoctorCheckId, DoctorRow, HostPermission, ProjectContext, ToolContext } from "../contracts/types.ts";
 import { findRuntime } from "../sandbox/runtimes.ts";
 import { runProcess, type RunResult } from "../sandbox/spawn.ts";
 
-function pass(id: DoctorCheckId, detail: string = DOCTOR_PASS_DETAIL): DoctorRow {
+// The ordered rows only: D12 (ADR-0026) builds its row itself, outside DOCTOR_CHECK_ORDER.
+type OrderCheckId = Exclude<DoctorCheckId, "D12">;
+function pass(id: OrderCheckId, detail: string = DOCTOR_PASS_DETAIL): DoctorRow {
   return { id, label: DOCTOR_LABEL[id], status: "PASS", detail };
 }
-function unknown(id: DoctorCheckId, detail: string, fixCommand?: string): DoctorRow {
+function unknown(id: OrderCheckId, detail: string, fixCommand?: string): DoctorRow {
   return fixCommand === undefined ? { id, label: DOCTOR_LABEL[id], status: "UNKNOWN", detail } : { id, label: DOCTOR_LABEL[id], status: "UNKNOWN", detail, fixCommand };
 }
-function fail(id: DoctorCheckId, detail: string, fixCommand: string): DoctorRow {
+function fail(id: OrderCheckId, detail: string, fixCommand: string): DoctorRow {
   return { id, label: DOCTOR_LABEL[id], status: "FAIL", detail, fixCommand };
 }
 function warn(id: DoctorCheckId, detail: string, fixCommand: string): DoctorRow {
@@ -287,4 +291,27 @@ export function checkShell(env: NodeJS.ProcessEnv): DoctorRow {
   const shell = findRuntime("shell", env);
   if (shell !== null) return pass("D11", D11_PASS_DETAIL(shell, win));
   return win ? fail("D11", D11_WIN_DETAIL, D11_WIN_FIX) : fail("D11", D11_POSIX_DETAIL, D11_POSIX_FIX);
+}
+
+// ADR-0026 D12 "daemon": reachability of the shared daemon. The row exists only when this process is
+// the daemon (a self-probe of its own /healthz) or CONTEXT_MODE_DAEMON_PORT names a port (the opt-in
+// signal from a stdio session); a plain stdio session with no daemon config shows no D12 row at all,
+// so the default report stays byte-identical (ADR-0026 decision 5). Built without the pass/fail
+// helpers: D12 sits outside DOCTOR_CHECK_ORDER and carries its own label.
+export async function checkDaemon(env: NodeJS.ProcessEnv): Promise<DoctorRow | undefined> {
+  const self = daemonSelfPort();
+  if (self === undefined && !daemonCheckWanted(env)) return undefined;
+  const port = self ?? daemonConfiguredPort(env);
+  const row = (status: DoctorRow["status"], detail: string, fixCommand?: string): DoctorRow =>
+    fixCommand === undefined ? { id: "D12", label: DAEMON_CHECK_LABEL, status, detail } : { id: "D12", label: DAEMON_CHECK_LABEL, status, detail, fixCommand };
+  try {
+    const r = await fetch(`http://${DAEMON_HOST}:${port}${DAEMON_HEALTH_PATH}`, { signal: AbortSignal.timeout(DAEMON_PROBE_TIMEOUT_MS), redirect: "manual" });
+    const prefix = self === undefined ? "" : DAEMON_CHECK_SELF_DETAIL + "; ";
+    // Anything that is not the daemon's own 204 (a 404 from another service, a 500) is NOT
+    // a healthy daemon: fetch resolves for every response, so the status is the verdict.
+    if (r.status === 204) return row("PASS", `${prefix}${DAEMON_CHECK_PASS_DETAIL} at ${daemonUrlOf(port)}`);
+    return row("FAIL", `${daemonUrlOf(port)} answered HTTP ${r.status}, not the daemon's 204`, DAEMON_CHECK_FIX);
+  } catch {
+    return row("FAIL", `${DAEMON_CHECK_DOWN_DETAIL} ${daemonUrlOf(port)}`, DAEMON_CHECK_FIX);
+  }
 }

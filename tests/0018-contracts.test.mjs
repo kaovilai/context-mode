@@ -398,7 +398,7 @@ describe("ADR-0018: contracts (concurrent)", { concurrency: CONC }, () => {
     test("[M5] types.ts declares the impl/07 §0 tools-ops types (A-T1)", () => {
       const src = readFileSync(join(SRC, "types.ts"), "utf8");
       for (const s of [
-        'export type DoctorCheckId = "D1" | "D2" | "D3" | "D4" | "D5" | "D5b" | "D6" | "D7" | "D8" | "D9" | "D10" | "D11";',
+        'export type DoctorCheckId = "D1" | "D2" | "D3" | "D4" | "D5" | "D5b" | "D6" | "D7" | "D8" | "D9" | "D10" | "D11" | "D12"; // D12: ADR-0026 daemon row',
         "export interface DoctorRow {", "id: DoctorCheckId;", "label: string;", 'status: "PASS" | "WARN" | "FAIL" | "UNKNOWN";',
         "detail: string;", "fixCommand?: string;",
         "export interface V1Finding { file: string; path: string; reason: string; }",
