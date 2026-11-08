@@ -366,7 +366,9 @@ describe("A26 review round 1", { concurrency: false }, () => {
     assert.equal(sessionIdOf(undefined, "claude-code", {}, "mcp:proc"), "mcp:proc");
   });
 
-  test("SIGTERM during an in-flight tool call exits cleanly (A26-r7: core shuts down last)", async () => {
+  // A26-r7 skip on Windows: child.kill("SIGTERM") there is TerminateProcess — the process dies
+  // without running any handler, so the graceful exit-0 path this test pins cannot be observed.
+  test("SIGTERM during an in-flight tool call exits cleanly (A26-r7: core shuts down last)", { skip: process.platform === "win32" }, async () => {
     const url = await spawnDaemon();
     const client = new Client({ name: "claude-code", version: "2.1.303" });
     const transport = new StreamableHTTPClientTransport(new URL(url), {
@@ -428,9 +430,11 @@ describe("A26 review round 1", { concurrency: false }, () => {
 
   test("--install with no HOME is a line, not a stack trace (A26-r10)", async () => {
     await spawnDaemon(); // ensure the bundle exists
+    // on win32 homeDirOf reads HOMEDRIVE+HOMEPATH before HOME (config-dir.ts), so an empty-HOME
+    // probe must clear those too or the runner's real home answers and the unit is written for real
     const r = spawnSync(process.execPath, [join(bundleDir, "daemon.mjs"), "--install"], {
       encoding: "utf8",
-      env: { ...process.env, HOME: "", USERPROFILE: "" },
+      env: { ...process.env, HOME: "", USERPROFILE: "", ...(process.platform === "win32" ? { HOMEDRIVE: "", HOMEPATH: "" } : {}) },
     });
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.ok((r.stdout + r.stderr).includes("not written"), r.stdout + r.stderr);
