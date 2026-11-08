@@ -2,7 +2,11 @@
 on:
   issues:
     types: [labeled]
-  schedule: hourly
+  # explicit cron, not `schedule: hourly`: the fuzzy form scatters to a different
+  # cron minute on every compile, so the committed lock file can never match what
+  # the Agentic Workflow Lock Files check compiles. A non-round minute keeps the
+  # load-scattering intent.
+  schedule: "47 * * * *"
   workflow_dispatch:
     inputs:
       issue_number:
