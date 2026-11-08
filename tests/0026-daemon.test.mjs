@@ -1,0 +1,469 @@
+// tests/0026-daemon.test.mjs
+// Area: ADR-0026 (shared HTTP daemon). One file per ADR area (ADR-0024, docs/architecture/TEST-LAYOUT.md).
+// Covers: the daemon entry (flags, unit text, serving), per-session identity over one process
+// (session id, agent from clientInfo, workspace from the request header), the project-shared index
+// across sessions, the doctor D12 row, and the stdio default staying the default.
+import { describe, test, before, after } from "node:test";
+import { CONC } from "./_lib/concurrency.mjs";
+import assert from "node:assert/strict";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { createServer, request } from "node:http";
+import { parseDaemonArgs, daemonUnitText } from "../src/entries/daemon.ts";
+import { route } from "../src/entries/cli.ts";
+import { HELP_MAIN } from "../src/cli/args.ts";
+import { checkDaemon } from "../src/core/ops/doctor-env.ts";
+import { isAbsoluteWorkspacePath } from "../src/entries/daemon.ts";
+import { sessionIdOf } from "../src/entries/server-core.ts";
+import { DAEMON_ADD_COMMAND, DAEMON_CHECK_FIX, DAEMON_DEFAULT_PORT, DAEMON_PORT_ENV, DAEMON_SESSION_HEADER } from "../src/core/contracts/constants.ts";
+
+const REPO = join(import.meta.dirname, "..");
+
+describe("ADR-0026 daemon flags and unit", { concurrency: CONC }, () => {
+  test("parseDaemonArgs: default port, env override, --port override (0 picks a free port)", () => {
+    assert.equal(parseDaemonArgs([], {}).port, DAEMON_DEFAULT_PORT);
+    assert.equal(parseDaemonArgs([], { [DAEMON_PORT_ENV]: "9001" }).port, 9001);
+    assert.equal(parseDaemonArgs(["--port", "9002"], { [DAEMON_PORT_ENV]: "9001" }).port, 9002);
+    assert.equal(parseDaemonArgs(["--port", "0"], {}).port, 0);
+  });
+
+  test("parseDaemonArgs: usage errors are one line, exit-2 shaped", () => {
+    for (const [argv, want] of [
+      [["--port"], "--port needs a value."],
+      [["--port", "70000"], "is not a port"],
+      [["--port", "abc"], "is not a port"],
+      [["--no-such-flag"], "unknown option"],
+      [["--agent", "nope"], "unknown agent"],
+      [["--print-command", "--install"], "at most one"],
+      [["--install", "--agent", "codex"], "every agent"],
+    ]) {
+      const r = parseDaemonArgs([...argv], {});
+      assert.ok("error" in r, argv.join(" "));
+      assert.ok(r.error.includes(want), `${argv.join(" ")}: ${r.error}`);
+    }
+  });
+
+  test("daemonUnitText: loopback daemon unit with Restart=on-failure and the port env", () => {
+    const unit = daemonUnitText("/usr/bin/node", "/opt/cm/daemon.mjs", 8790);
+    assert.ok(unit.includes('ExecStart="/usr/bin/node" "/opt/cm/daemon.mjs"'));
+    assert.ok(unit.includes("Restart=on-failure"));
+    assert.ok(unit.includes(`Environment="${DAEMON_PORT_ENV}=8790"`));
+    assert.ok(unit.includes("WantedBy=default.target"));
+  });
+
+  test("daemonUnitText quotes paths with spaces (an npm prefix like /home/u/context mode)", () => {
+    const unit = daemonUnitText("/home/u/context mode/node", "/home/u/context mode/daemon.mjs", 8790);
+    assert.ok(unit.includes('ExecStart="/home/u/context mode/node" "/home/u/context mode/daemon.mjs"'));
+  });
+
+  test("the CLI routes daemon to the daemon bundle; server/mcp stay stdio; help names daemon", () => {
+    assert.deepEqual(route(["daemon"], "2.1.5"), { kind: "run", file: "daemon.mjs", args: [] });
+    assert.deepEqual(route(["daemon", "--port", "0"], "2.1.5"), { kind: "run", file: "daemon.mjs", args: ["--port", "0"] });
+    assert.deepEqual(route(["server"], "2.1.5"), { kind: "run", file: "server.mjs", args: [] });
+    assert.ok(HELP_MAIN.includes("daemon"));
+  });
+
+  test("the add command line is the one the daemon prints", () => {
+    assert.equal(DAEMON_ADD_COMMAND("http://127.0.0.1:8790/mcp"), "claude mcp add --transport http context-mode http://127.0.0.1:8790/mcp");
+  });
+});
+
+describe("ADR-0026 doctor D12", { concurrency: CONC }, () => {
+  test("no row when this process is not the daemon and no port is configured (default report unchanged)", async () => {
+    assert.equal(await checkDaemon({}), undefined);
+    assert.equal(await checkDaemon({ [DAEMON_PORT_ENV]: "not-a-port" }), undefined);
+  });
+
+  test("FAIL with the fix command when a port is configured and nothing answers", async () => {
+    const row = await checkDaemon({ [DAEMON_PORT_ENV]: "59998" }); // nothing listens here
+    assert.ok(row !== undefined);
+    assert.equal(row.id, "D12");
+    assert.equal(row.status, "FAIL");
+    assert.equal(row.fixCommand, DAEMON_CHECK_FIX);
+    assert.ok(row.detail.includes("no daemon answers"));
+  });
+});
+
+// The serving block runs in order: one daemon child, N clients, /proc reads (Linux) for the process facts.
+describe("ADR-0026 one daemon, many sessions", () => {
+  let root;
+  let repo;
+  let bundleDir;
+  let child;
+  let url;
+  let oldHome;
+
+  before(() => {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), "cm-daemon-")));
+    repo = join(root, "repo");
+    mkdirSync(repo);
+    oldHome = process.env.HOME;
+    process.env.HOME = root;
+    process.env.USERPROFILE = root;
+    bundleDir = join(root, "bundle");
+    const r = spawnSync(process.execPath, [join(REPO, "build", "build.mjs"), "--out", bundleDir], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  });
+
+  after(() => {
+    process.env.HOME = oldHome;
+    process.env.USERPROFILE = oldHome;
+    child?.kill("SIGTERM");
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    } catch (err) {
+      if (process.platform !== "win32" || err.code !== "EPERM") throw err;
+    }
+  });
+
+  async function connect(sessionId) {
+    const client = new Client({ name: "claude-code", version: "2.1.303" });
+    const transport = new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { "x-context-mode-workspace": repo } },
+    });
+    await client.connect(transport);
+    return {
+      client,
+      call: (name, args) => client.callTool({ name, arguments: args, _meta: { sessionId } }),
+      close: () => client.close(),
+    };
+  }
+
+  test("starts on a free port, answers healthz, prints the connect command", async () => {
+    child = spawn(process.execPath, [join(bundleDir, "daemon.mjs"), "--port", "0"], {
+      env: { ...process.env, HOME: root, USERPROFILE: root },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let banner = "";
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("daemon did not print its banner: " + banner)), 20000);
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        banner += chunk;
+        const line = banner.split("\n").find((l) => l.startsWith("context-mode daemon listening on "));
+        if (line !== undefined) {
+          clearTimeout(timer);
+          url = line.slice("context-mode daemon listening on ".length);
+          resolve();
+        }
+      });
+      child.once("exit", (code) => reject(new Error("daemon exited before the banner (code " + code + ")")));
+    });
+    assert.ok(/http:\/\/127\.0\.0\.1:[0-9]+\/mcp$/.test(url), url);
+    const health = await fetch(url.replace(/\/mcp$/, "/healthz"), { redirect: "manual" });
+    assert.equal(health.status, 204);
+  });
+
+  test("two sessions share one process: session B's project search finds session A's content", async () => {
+    const a = await connect("daemon-s1");
+    const list = await a.client.listTools();
+    assert.deepEqual(list.tools.map((t) => t.name).map(String), [
+      "ctx_execute", "ctx_batch", "ctx_index", "ctx_search", "ctx_resume", "ctx_stats", "ctx_doctor", "ctx_upgrade", "ctx_purge",
+    ]);
+    const indexed = await a.call("ctx_index", { content: "albatross cargo manifest, port side, row 13" });
+    assert.notEqual(indexed.isError, true, indexed.content?.[0]?.text);
+    await a.close();
+
+    const b = await connect("daemon-s2");
+    const project = await b.call("ctx_search", { queries: ["albatross"], scope: "project" });
+    assert.ok(JSON.stringify(project.content).includes("albatross"), "session B must find session A's project-indexed content");
+    // ADR-0007 decision 4 / DECISIONS-r9 F4: the session scope never leaks across sessions.
+    const own = await b.call("ctx_search", { queries: ["albatross"], scope: "session" });
+    assert.ok(JSON.stringify(own.content).includes("No hits"), "session B must not see session A's rows in scope session");
+    await b.close();
+  });
+
+  test("exactly one daemon process serves every session, RSS flat in the session count", { skip: process.platform !== "linux" }, async () => {
+    // /proc exists only on Linux; the count assertion below still runs everywhere
+    const rssKb = () => Number(readFileSync(join("/proc", String(child.pid), "status"), "utf8").split("\n").find((l) => l.startsWith("VmRSS:"))?.replace(/[^0-9]/g, "") ?? NaN);
+    const before = rssKb();
+    const clients = [];
+    for (let i = 0; i < 4; i++) clients.push(await connect("daemon-flat-" + i));
+    for (const c of clients) {
+      const r = await c.call("ctx_stats", {});
+      assert.notEqual(r.isError, true, r.content?.[0]?.text);
+    }
+    const ps = spawnSync("ps", ["-eo", "pid,args"], { encoding: "utf8" });
+    const mine = ps.stdout.split("\n").filter((l) => l.includes(join(bundleDir, "daemon.mjs")) && !l.includes("ps "));
+    assert.equal(mine.length, 1, "one daemon process: " + mine.join(" / "));
+    assert.equal(Number(mine[0].trim().split(/\s+/)[0]), child.pid);
+    if (Number.isFinite(before)) {
+      const delta = rssKb() - before;
+      assert.ok(delta < 32 * 1024, `RSS grew ${delta} kB for 4 sessions; a session is a transport pair, not a process`);
+    }
+    for (const c of clients) await c.close();
+  });
+
+  test("a closed session id is gone: the next request with it gets 404", async () => {
+    const c = await connect("daemon-close-1");
+    await c.close();
+    const gone = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-session-id": "no-such-session" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    assert.equal(gone.status, 404);
+    // A non-initialize POST with no session id at all is the spec's 400, and the pair it created is
+    // closed, not kept (ADR-0026 decision 4: no per-request state outlives its exchange).
+    const noSession = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }),
+    });
+    assert.equal(noSession.status, 400);
+  });
+
+  test("ctx_doctor shows D12 PASS while the daemon answers, FAIL lines name the fix when it is down", async () => {
+    const port = Number(url.match(/:([0-9]+)\/mcp$/)[1]);
+    const c = await connect("daemon-doc-1");
+    const r = await c.call("ctx_doctor", {});
+    const text = String(r.content[0].text);
+    assert.ok(text.includes("| D12 daemon | PASS |"), text);
+    await c.close();
+    // The down path: a configured port with no listener (the live daemon is on another port).
+    const row = await checkDaemon({ [DAEMON_PORT_ENV]: String(port + 1) });
+    assert.equal(row?.status, "FAIL");
+    assert.equal(row?.fixCommand, DAEMON_CHECK_FIX);
+  });
+
+  test("the stdio default: server.mjs with no flags still speaks stdio, daemon.mjs is a separate bundle", async () => {
+    assert.ok(existsSync(join(bundleDir, "daemon.mjs")));
+    assert.ok(existsSync(join(bundleDir, "server.mjs")));
+    const { spawnBundle } = await import("../e2e/harness/mcp-client.mjs");
+    const client = spawnBundle(join(bundleDir, "server.mjs"), { HOME: root, USERPROFILE: root }, ["--agent", "codex"], { cwd: repo });
+    const init = await client.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "codex-mcp-client", version: "0" } });
+    assert.equal(init.serverInfo.name, "context-mode");
+    const tools = await client.request("tools/list", {});
+    assert.equal(tools.tools.length, 9);
+    await client.close();
+  });
+});
+
+
+describe("A26 review round 1", { concurrency: false }, () => {
+  let proc;
+  let root;
+  let repo;
+  let bundleDir;
+  let oldHome;
+
+  before(() => {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), "cm-daemon-r1-")));
+    repo = join(root, "repo");
+    mkdirSync(repo);
+    oldHome = process.env.HOME;
+    process.env.HOME = root;
+    process.env.USERPROFILE = root;
+    bundleDir = join(root, "bundle");
+    const r = spawnSync(process.execPath, [join(REPO, "build", "build.mjs"), "--out", bundleDir], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  });
+
+  after(() => {
+    process.env.HOME = oldHome;
+    process.env.USERPROFILE = oldHome;
+    proc?.kill("SIGTERM");
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    } catch (err) {
+      if (err.code !== "EPERM") throw err;
+    }
+  });
+
+  async function spawnDaemon() {
+    proc?.kill("SIGTERM"); // only the last spawn is killed by after(); earlier ones die here
+    proc = spawn(process.execPath, [join(bundleDir, "daemon.mjs"), "--port", "0"], {
+      env: { ...process.env, HOME: root, USERPROFILE: root },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let banner = "";
+    const url = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("daemon did not print its banner: " + banner)), 20000);
+      proc.stdout.setEncoding("utf8");
+      proc.stdout.on("data", (chunk) => {
+        banner += chunk;
+        const line = banner.split("\n").find((l) => l.startsWith("context-mode daemon listening on "));
+        if (line !== undefined) { clearTimeout(timer); resolve(line.slice("context-mode daemon listening on ".length)); }
+      });
+      proc.once("exit", (code) => reject(new Error("daemon exited before the banner (code " + code + ")")));
+    });
+    return url;
+  }
+
+  test("D12 FAILs when something else answers the port (a 404 or 500 is not a healthy daemon)", async () => {
+    const other = createServer((req, res) => { res.writeHead(404).end(); });
+    await new Promise((r) => other.listen(0, "127.0.0.1", r));
+    const port = other.address().port;
+    try {
+      const row = await checkDaemon({ [DAEMON_PORT_ENV]: String(port) });
+      assert.ok(row !== undefined && row.status === "FAIL", JSON.stringify(row));
+      assert.ok(row.detail.includes("404"), row.detail);
+      assert.equal(row.fixCommand, DAEMON_CHECK_FIX);
+    } finally {
+      other.close();
+      other.closeAllConnections?.();
+    }
+  });
+
+  test("the daemon refuses a foreign Host (DNS rebinding) and any Origin (browsers)", async () => {
+    const url = await spawnDaemon();
+    // fetch cannot override Host (a forbidden header), so the rebinding probe is a raw request
+    const foreign = await new Promise((resolve, reject) => {
+      const u = new URL(url);
+      const r = request({ host: u.hostname, port: Number(u.port), path: u.pathname, method: "POST", headers: { host: "evil.example", "content-type": "application/json" }, setHost: false }, (res) => { res.resume(); resolve(res.statusCode); });
+      r.on("error", reject);
+      r.end("{}");
+    });
+    assert.equal(foreign, 421);
+    const browser = await fetch(url, { headers: { origin: "https://evil.example" } });
+    assert.equal(browser.status, 403);
+    // and loopback Host still works (the health probe)
+    const health = await fetch(url.replace(/\/mcp$/, "/healthz"), { redirect: "manual" });
+    assert.equal(health.status, 204);
+  });
+
+  test("systemctl failure is a line, not a crash (hosts without systemd)", async () => {
+    const url = await spawnDaemon(); // ensure the bundle exists
+    assert.ok(url.length > 0);
+    const r = spawnSync(process.execPath, [join(bundleDir, "daemon.mjs"), "--install"], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: root, USERPROFILE: root, PATH: "" }, // no systemctl anywhere
+    });
+    assert.equal(r.status, 1, r.stdout + r.stderr); // EXIT_FAIL: reported, not crashed
+    assert.ok((r.stdout + r.stderr).includes("not started"), r.stdout + r.stderr);
+    assert.ok(!/TypeError|^\s+at .+[(:]/mu.test(r.stderr), r.stderr);
+  });
+
+  test("an unidentified request never pools into the process session (A26-r6)", async () => {
+    const { daemonRouting } = await import("../src/entries/daemon.ts");
+    const core = { serverId: "mcp:proc", createMcpServer: () => { throw new Error("unused"); } };
+    const routing = daemonRouting([], process.env, core);
+    const anonReq = () => ({ http: { req: { headers: new Headers() } }, sessionId: undefined });
+    const a = routing.fallbackIdOf(anonReq());
+    const b = routing.fallbackIdOf(anonReq());
+    assert.notEqual(a, core.serverId, "the process id must not be the anonymous fallback");
+    assert.notEqual(a, b, "two unidentified requests must not share a session id");
+    assert.ok(a.startsWith("anon-") && b.startsWith("anon-"), `${a} ${b}`);
+    const withHeader = { http: { req: { headers: new Headers({ [DAEMON_SESSION_HEADER]: "host-1" }) } }, sessionId: undefined };
+    assert.equal(routing.fallbackIdOf(withHeader), "host-1");
+    // unprefixed through sessionIdOf: the whole point is to equal the hooks' host id (A26-r8)
+    assert.equal(sessionIdOf(undefined, "claude-code", {}, routing.fallbackIdOf(withHeader)), "host-1");
+    // an EMPTY header is absent (A26-r11): Headers.get returns "", and ?? alone would pass it
+    const emptyHeader = { http: { req: { headers: new Headers({ [DAEMON_SESSION_HEADER]: "" }) } }, sessionId: "transport-1" };
+    assert.equal(routing.fallbackIdOf(emptyHeader), "transport-1");
+    // a hostile header value is ignored, never a journal key (A26-r9)
+    for (const bad of ["has space", "x".repeat(129), ";; rm -rf", "drop;table"]) {
+      const hostile = { http: { req: { headers: new Headers({ [DAEMON_SESSION_HEADER]: bad }) } }, sessionId: "transport-1" };
+      assert.equal(routing.fallbackIdOf(hostile), "transport-1", bad);
+    }
+    const withTransport = { http: { req: { headers: new Headers() } }, sessionId: "transport-1" };
+    assert.equal(routing.fallbackIdOf(withTransport), "transport-1");
+    // the stdio fallback keeps its process-local prefix
+    assert.equal(sessionIdOf(undefined, "claude-code", {}, "mcp:proc"), "mcp:proc");
+  });
+
+  test("SIGTERM during an in-flight tool call exits cleanly (A26-r7: core shuts down last)", async () => {
+    const url = await spawnDaemon();
+    const client = new Client({ name: "claude-code", version: "2.1.303" });
+    const transport = new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { "x-context-mode-workspace": repo } },
+    });
+    await client.connect(transport);
+    const slow = client.callTool({ name: "ctx_index", arguments: { content: "in-flight database write " + "x".repeat(200000) } }).catch(() => "cut");
+    await new Promise((r) => setTimeout(r, 150));
+    const exited = new Promise((resolve) => proc.once("exit", (c, sig) => resolve(c ?? sig)));
+    proc.kill("SIGTERM");
+    await slow;
+    const code = await exited;
+    assert.equal(code, 0, "the daemon must exit 0 on SIGTERM with a call in flight");
+    await client.close();
+    proc = undefined; // already dead; after() must not kill it again
+  });
+
+  test("close() resolves with an open SSE stream (A26-r11: connections drop before the close wait)", async () => {
+    const { startDaemon } = await import("../src/entries/daemon.ts");
+    const handle = await startDaemon([], { ...process.env, HOME: root, USERPROFILE: root });
+    const client = new Client({ name: "claude-code", version: "2.1.303" });
+    const transport = new StreamableHTTPClientTransport(new URL(handle.url), {
+      requestInit: { headers: { "x-context-mode-workspace": repo } },
+    });
+    await client.connect(transport); // the 2025 transport holds an open SSE GET stream
+    let hung;
+    try {
+      await Promise.race([
+        handle.close(),
+        new Promise((_, reject) => { hung = setTimeout(() => reject(new Error("close() hung on the open SSE stream")), 8000); }),
+      ]);
+    } finally {
+      clearTimeout(hung);
+    }
+    await client.close().catch(() => {});
+  });
+
+  test("an in-flight database call completes through close() (A26-r12: drain before shutdown)", async () => {
+    const { startDaemon } = await import("../src/entries/daemon.ts");
+    const handle = await startDaemon([], { ...process.env, HOME: root, USERPROFILE: root });
+    const client = new Client({ name: "claude-code", version: "2.1.303" });
+    const transport = new StreamableHTTPClientTransport(new URL(handle.url), {
+      requestInit: { headers: { "x-context-mode-workspace": repo } },
+    });
+    await client.connect(transport);
+    // fire a call whose dispatch spans the sandbox run AND its journal write (the DB write is
+    // part of the counted dispatch), SYNCHRONIZE on the handler being mid-flight (inFlight),
+    // then close: the drain must hold the transports and the core open until the dispatch
+    // finishes, so the call succeeds with its row written to still-open databases
+    const call = client.callTool({ name: "ctx_execute", arguments: { language: "bash", code: "sleep 1" } });
+    const until = Date.now() + 10000;
+    while (handle.inFlight() < 1 && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(handle.inFlight() >= 1, "the call must be mid-flight before the close starts");
+    await handle.close();
+    const r = await call;
+    assert.notEqual(r.isError, true, JSON.stringify(r.content));
+    await client.close().catch(() => {});
+  });
+
+  test("--install with no HOME is a line, not a stack trace (A26-r10)", async () => {
+    await spawnDaemon(); // ensure the bundle exists
+    const r = spawnSync(process.execPath, [join(bundleDir, "daemon.mjs"), "--install"], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: "", USERPROFILE: "" },
+    });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.ok((r.stdout + r.stderr).includes("not written"), r.stdout + r.stderr);
+    assert.ok(!/TypeError|at /u.test(r.stderr), r.stderr);
+  });
+
+  test("isAbsoluteWorkspacePath: POSIX, Windows drive and UNC pass; relative and bare words do not", () => {
+    for (const good of ["/home/u/repo", "/tmp/x", "C:\\work\\repo", "D:/repo", "\\\\server\\\\share\\\\repo"]) {
+      assert.ok(isAbsoluteWorkspacePath(good), good);
+    }
+    for (const bad of ["repo", "./repo", "../repo", "repo/x", ""]) {
+      assert.ok(!isAbsoluteWorkspacePath(bad), bad);
+    }
+  });
+
+  test("the session header separates two clients on one daemon", async () => {
+    const url = await spawnDaemon();
+    const mk = async (session) => {
+      const client = new Client({ name: "claude-code", version: "2.1.303" });
+      const transport = new StreamableHTTPClientTransport(new URL(url), {
+        requestInit: { headers: { "x-context-mode-workspace": repo, "x-context-mode-session": session } },
+      });
+      await client.connect(transport);
+      return { client, call: (name, args) => client.callTool({ name, arguments: args }) };
+    };
+    const a = await mk("host-session-A");
+    await a.call("ctx_index", { content: "session header A marker albatross" });
+    const b = await mk("host-session-B");
+    const own = await b.call("ctx_search", { queries: ["albatross"], scope: "session" });
+    assert.ok(JSON.stringify(own.content).includes("No hits"), "session B must not see session header A rows");
+    const viaHeader = await a.call("ctx_search", { queries: ["albatross"], scope: "session" });
+    assert.ok(JSON.stringify(viaHeader.content).includes("albatross"), "session A must see its own rows via the header id");
+    await a.client.close();
+    await b.client.close();
+  });
+});

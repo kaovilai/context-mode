@@ -442,9 +442,9 @@ describe("ADR-0018 build: manifests", () => {
   // name, version, bin, type, engines, files and pi (Pi reads "pi".extensions from the package dir); no dependencies,
   // no scripts, no private.
   const D1_FILES = [
-    ".claude-plugin", ".codex-plugin", ".zcode-plugin", "LICENSE", "README.md", "SHA256SUMS", "cli.mjs", "codex", "copilot", "fixtures", "gemini-extension.json", "hook.mjs", "hooks",
+    ".claude-plugin", ".codex-plugin", ".zcode-plugin", "LICENSE", "README.md", "SHA256SUMS", "cli.mjs", "codex", "copilot", "daemon.mjs", "fixtures", "gemini-extension.json", "hook.mjs", "hooks",
     "opencode", "pi", "qwen-extension.json", "run.mjs", "search.mjs", "server.mjs", "skills",
-  ];
+  ]; // daemon.mjs: ADR-0026, the shared daemon bundle
   test("package.json is the D1 npm shape: name, version, bin, type, engines, files, pi (extensions, skills)", (t) => {
     const dir = scratch(t);
     generateManifests(dir, "2.0.0");

@@ -132,6 +132,7 @@ const ALLOWED_FILES = [
   "scripts/gate.mjs", "scripts/ci-gs4-lint.mjs", "scripts/record-fixtures.mjs", "scripts/ci-install.mjs",
   // v2 user docs outside docs/architecture and docs/install (cleanup-plan §2).
   "docs/how-it-works.md", "docs/tools.md", "docs/algorithms.md", "docs/performance.md", "docs/UPSTREAM-CREDITS.md",
+  "docs/daemon.md", // ADR-0026: the shared daemon guide
   // Root files.
   "README.md", "CONTRIBUTING.md", "LICENSE", "stats.json", "package.json", "tsconfig.json", ".gitignore", ".gitattributes",
   ...MAIN_TREE_FILES,
