@@ -241,6 +241,10 @@ var EXEC_LANGUAGES = Object.freeze(["shell", "powershell", "javascript", "typesc
 var SHELL_FAMILY = Object.freeze(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
 var PLAIN_OUTPUT_ENV = Object.freeze({ NO_COLOR: "1", FORCE_COLOR: "0" });
 var HOST_SESSION_ENV = Object.freeze({ "claude-code": "CLAUDE_CODE_SESSION_ID" });
+var DAEMON_HOST = "127.0.0.1";
+var DAEMON_DEFAULT_PORT = 8790;
+var DAEMON_PATH = "/mcp";
+var DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}`;
 var NODE_MIN = "24.15.0";
 var DATA_ROOT = "~/.context-mode";
 var DATA_DIR_ENV = "CONTEXT_MODE_DATA_DIR";
@@ -1680,7 +1684,7 @@ function getAdapter(id) {
 
 // src/cli/args.ts
 var COMMANDS = ["setup", "doctor", "upgrade"];
-var ALL_COMMANDS = ["setup", "doctor", "upgrade", "server", "mcp", "hook", "help"];
+var ALL_COMMANDS = ["setup", "doctor", "upgrade", "server", "mcp", "hook", "daemon", "help"];
 var AGENT_IDS = ADAPTERS.map((a2) => a2.id);
 var COMMON = ["--help", "-h", "--json", "--yes", "-y", "--no-input", "--debug", "--quiet", "-q", "--verbose", "--no-color", "--agents"];
 var FLAGS = {
@@ -1809,6 +1813,7 @@ Commands:
   doctor                      Check every agent; changes nothing
   upgrade                     Install the newest context-mode from npm, then repair each agent
   server [--agent <id>]       Run the MCP server on stdio (alias: mcp)
+  daemon [--port <n>]         Run one shared MCP server for every session (opt-in; see docs/daemon.md)
   hook --agent <id>           Run one hook call: JSON on stdin, answer on stdout
   hook <platform> <event>     Old form of hook; still works, run context-mode setup to update it
 
@@ -1821,6 +1826,7 @@ Examples:
   context-mode setup
   context-mode doctor --agents codex
   context-mode server --agent codex
+  context-mode daemon --install
 `;
 var COMMON_HELP = `  --agents <ids>     Only these agents, comma-separated (ids: context-mode setup --list)
   -y, --yes          Do not ask; apply
@@ -10614,6 +10620,7 @@ var EXIT_USAGE2 = 2;
 var EXIT_SIGINT2 = 130;
 var SERVER_FILE = "server.mjs";
 var HOOK_FILE = "hook.mjs";
+var DAEMON_FILE = "daemon.mjs";
 var PACKAGE_FILE = "package.json";
 var V1_PLATFORM_AGENT = Object.freeze({
   "claude-code": "claude-code",
@@ -10637,6 +10644,7 @@ function route(argv, version) {
   if (cmd === void 0 || cmd === "-h" || cmd === "--help" || cmd === "help") return { kind: "exit", code: EXIT_OK2, stdout: HELP2 };
   if (cmd === "-v" || cmd === "--version") return { kind: "exit", code: EXIT_OK2, stdout: version + "\n" };
   if (cmd === "server" || cmd === "mcp") return { kind: "run", file: SERVER_FILE, args: rest };
+  if (cmd === "daemon") return { kind: "run", file: DAEMON_FILE, args: rest };
   if (cmd === "hook") {
     if (rest.includes(AGENT_ARG)) return { kind: "run", file: HOOK_FILE, args: rest };
     const [platform = ""] = rest;
