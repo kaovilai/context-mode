@@ -59,6 +59,22 @@ caches are per-DB-connection. Nothing keys identity at process scope except the 
    (one transport pair per session, small; no idle timer on purpose — PRD P5's no-idle-timer rule).
 5. **The default is pinned.** D12 (below) and every daemon surface appear only on the daemon path; the
    stdio report, CLI routing and bundle tree for `server.mjs` keep their bytes.
+6. **Roots-capable clients are steered off the 2026-07-28 era (A26-r14).** Decision 3's workspace order
+   puts `roots/list` before the daemon cwd, but on the per-request-envelope era the SDK cannot deliver
+   server-to-client requests ("roots/list cannot be sent while serving a request on that revision"), so
+   a client that negotiated that era — Claude Code does: it probes `server/discover` before
+   `initialize` — never got its roots asked and fell through to the daemon-cwd workspace. Under the
+   systemd unit that cwd is `$HOME`, so every such session of every project pooled into one project DB
+   whose `worktree` column matched every row: cross-session, cross-project `ctx_search` results and
+   source handles that named another session's rows (the hook-side `s<N>` handles live in the
+   per-project DB the session's cwd keys, so they resolved to unrelated sources over the daemon). The
+   daemon answers a `server/discover` probe whose declared client capabilities include `roots` with
+   `-32601` — the answer of a 2025-era-only server, which is what the SDK itself gives without modern
+   versions in `supportedProtocolVersions` — and the client negotiates the sessionful leg, where
+   `roots/list` answers and the project resolves per session (verified live: Claude Code 2.1.317 falls
+   back to the sessionful handshake on that answer and reports its cwd in `roots/list`). A client that
+   declares no roots cannot help resolve the workspace either way and keeps the modern era, where the
+   `x-context-mode-workspace` header (or the Codex `_meta` workspace) names the project.
 
 ## Doctor D12
 

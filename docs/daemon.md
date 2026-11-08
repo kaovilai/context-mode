@@ -65,6 +65,16 @@ Each session keeps its own session scope (a `scope: "session"` search never sees
 rows); the project index is shared by design, so `scope: "project"` finds what any session of that
 project indexed.
 
+A client that declares the `roots` capability (Claude Code, VS Code) needs no header: the daemon
+answers its `server/discover` probe with "method not found" — the answer of a 2025-era-only server —
+so it negotiates the sessionful Streamable HTTP era, where the daemon can ask `roots/list` and take
+the workspace from the answer (A26-r14). On the 2026-07-28 per-request-envelope era the SDK cannot
+deliver server-to-client requests at all, so without the steer such a client's workspace fell back
+to the daemon's own cwd (`$HOME` under the systemd unit) and every session of every project pooled
+into that one project's index: cross-project search results and source handles that named another
+session's rows. Clients that declare no roots keep the modern era and use the header above (or the
+Codex `_meta` workspace) to name the project.
+
 ## Session identity over HTTP
 
 The daemon names a session by, in order: the request's `_meta.sessionId`, the

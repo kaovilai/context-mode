@@ -7,13 +7,15 @@ import { describe, test, before, after } from "node:test";
 import { CONC } from "./_lib/concurrency.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createServer, request } from "node:http";
-import { parseDaemonArgs, daemonUnitText } from "../src/entries/daemon.ts";
+import { parseDaemonArgs, daemonUnitText, discoverSteer } from "../src/entries/daemon.ts";
 import { route } from "../src/entries/cli.ts";
 import { HELP_MAIN } from "../src/cli/args.ts";
 import { checkDaemon } from "../src/core/ops/doctor-env.ts";
@@ -467,6 +469,90 @@ describe("A26 review round 1", { concurrency: false }, () => {
     assert.ok(JSON.stringify(own.content).includes("No hits"), "session B must not see session header A rows");
     const viaHeader = await a.call("ctx_search", { queries: ["albatross"], scope: "session" });
     assert.ok(JSON.stringify(viaHeader.content).includes("albatross"), "session A must see its own rows via the header id");
+    await a.client.close();
+    await b.client.close();
+  });
+
+  // A26-r14: on the 2026-07-28 per-request-envelope era the SDK cannot deliver server-to-client
+  // requests, so roots/list never ran there and every roots-capable client that negotiated the
+  // modern era fell through to the daemon-cwd workspace — one pooled project DB for every session
+  // of every project. The daemon steers such clients to the 2025-era sessionful leg by answering
+  // their server/discover probe with -32601 (the answer of a 2025-era-only server).
+  const discoverBody = (caps) => JSON.stringify({
+    jsonrpc: "2.0",
+    id: "server-discover-probe-1",
+    method: "server/discover",
+    params: { _meta: {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": { name: "claude-code", version: "2.1.317" },
+      "io.modelcontextprotocol/clientCapabilities": caps,
+    } },
+  });
+  const discoverProbe = (url, caps) => fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      "MCP-Protocol-Version": "2026-07-28", // the full modern envelope, as a negotiating client sends it
+      "Mcp-Method": "server/discover",
+    },
+    body: discoverBody(caps),
+  });
+
+  test("discoverSteer: a roots-capable probe is steered; everything else is not (A26-r14)", () => {
+    assert.deepEqual(discoverSteer(discoverBody({ roots: { listChanged: true } })), { id: "server-discover-probe-1" });
+    assert.deepEqual(discoverSteer(discoverBody({ roots: {} })), { id: "server-discover-probe-1" });
+    assert.equal(discoverSteer(discoverBody({ elicitation: {} })), null, "no roots: the modern era is kept");
+    assert.equal(discoverSteer(discoverBody({})), null);
+    assert.equal(discoverSteer("[]"), null, "a batch is never steered");
+    assert.equal(discoverSteer("not json"), null);
+    assert.equal(discoverSteer(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { _meta: { "io.modelcontextprotocol/clientCapabilities": { roots: {} } } } })), null, "only server/discover");
+    assert.equal(discoverSteer(JSON.stringify({ jsonrpc: "2.0", method: "server/discover", params: { _meta: { "io.modelcontextprotocol/clientCapabilities": { roots: {} } } } })), null, "a notification carries no id to answer");
+    assert.deepEqual(discoverSteer(JSON.stringify({ jsonrpc: "2.0", id: 7, method: "server/discover", params: { _meta: { "io.modelcontextprotocol/clientCapabilities": { roots: {} } } } })), { id: 7 });
+  });
+
+  test("a roots-capable server/discover probe is answered method-not-found; a roots-less one keeps the modern era (A26-r14)", async () => {
+    const url = await spawnDaemon();
+    const steered = await discoverProbe(url, { roots: { listChanged: true } });
+    assert.equal(steered.status, 200);
+    const msg = await steered.json();
+    assert.equal(msg.error?.code, -32601, JSON.stringify(msg));
+    assert.equal(msg.id, "server-discover-probe-1");
+    const modern = await discoverProbe(url, { elicitation: {} });
+    assert.equal(modern.status, 200);
+    const msg2 = await modern.json();
+    assert.ok(msg2.error === undefined && msg2.result !== undefined, JSON.stringify(msg2));
+  });
+
+  test("a roots-capable client with no workspace header resolves its project from roots/list: no pooled DB, no cross-project hits (A26-r14)", async () => {
+    const url = await spawnDaemon();
+    const repoA = join(root, "rootsA");
+    const repoB = join(root, "rootsB");
+    mkdirSync(repoA, { recursive: true });
+    mkdirSync(repoB, { recursive: true });
+    writeFileSync(join(repoA, "roots-marker.log"), "2026-11-08 ERROR a26r14 quota exceeded\n");
+    // the Claude Code shape: no workspace header, roots declared and answered per roots/list
+    const connect = async (workspace) => {
+      const client = new Client({ name: "claude-code", version: "2.1.317" }, { capabilities: { roots: { listChanged: true } } });
+      client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots: [{ uri: pathToFileURL(workspace).href, name: "repo" }] }));
+      const transport = new StreamableHTTPClientTransport(new URL(url)); // no headers at all
+      await client.connect(transport);
+      return { client, call: (name, args) => client.callTool({ name, arguments: args }) };
+    };
+    const a = await connect(repoA);
+    // a relative path resolves inside the roots-listed workspace, so the workspace did resolve
+    // (a pooled daemon-cwd fallback would not find the file: it is in repoA, not HOME)
+    const indexed = await a.call("ctx_index", { path: "roots-marker.log" });
+    assert.notEqual(indexed.isError, true, indexed.content?.[0]?.text);
+    await a.call("ctx_index", { content: "a26r14 cross-talk canary: quipline fremen zeta" });
+    const b = await connect(repoB);
+    await b.call("ctx_index", { content: "a26r14 own-project marker: sandworm arrakis" });
+    // default scope is worktree: B must not see A's rows (before A26-r14 both pooled into the
+    // daemon-cwd project, whose worktree column matched every row, and this search found A's canary)
+    const miss = await b.call("ctx_search", { queries: ["quipline"] });
+    assert.ok(JSON.stringify(miss.content).includes("No hits"), "session B's worktree must not see session A's project: " + JSON.stringify(miss.content));
+    const own = await b.call("ctx_search", { queries: ["sandworm"] });
+    assert.ok(JSON.stringify(own.content).includes("sandworm"), "session B must find its own project's rows");
     await a.client.close();
     await b.client.close();
   });
