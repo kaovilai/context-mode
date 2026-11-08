@@ -187,6 +187,12 @@ export function DAEMON_ADD_COMMAND(url: string): string { return `claude mcp add
 export const DAEMON_UNIT_NAME = "context-mode-daemon.service"; // systemd user unit written by `context-mode daemon --install`
 export const DAEMON_UNIT_DIR = ["systemd", "user"]; // under $HOME/.config: paths are filled by --install, never typed by hand
 export const DAEMON_PROBE_TIMEOUT_MS = 1500; // D12 reachability probe budget
+// A26-r14: the 2026-07-28 era's negotiation probe. A client that sends it AND declares the roots
+// capability in its _meta is steered to the 2025-era sessionful leg (see daemon.ts discoverSteer):
+// on the per-request-envelope era the SDK cannot deliver roots/list, so decision 3's roots-based
+// workspace resolution would never run for such a client.
+export const DISCOVER_METHOD = "server/discover";
+export const CLIENT_CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities"; // a discover probe's declared client capabilities
 
 // Runtime
 export const NODE_MIN = "24.15.0"; // S-NODE
