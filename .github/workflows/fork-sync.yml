@@ -1,0 +1,88 @@
+# fork-sync (FORK ONLY): keep fork main carrying the latest upstream main.
+# Once a day (and by hand): rebase origin/main onto mksglu/context-mode's main and force-push the
+# result, so the fork's own commits (the shared daemon, fork CI fixes) stay replayed on top of
+# fresh upstream work. A clean rebase is one force-push; a conflicting one is never forced — the
+# run collects the conflicted files, opens (or updates) one open issue labeled `fork-sync`, and the
+# agentic workflow .github/workflows/fork-sync-reconcile.md resolves it into a pull request, which
+# the NEXT run merges when its checks are green before rebasing again.
+# A green fork-sync pull request is squash-merged first: after the merge, main holds the resolved
+# content, and the rebase below re-linearizes main onto upstream/main (already-applied fork
+# commits are dropped by patch-id, so the loop converges to upstream + remaining fork commits).
+name: fork-sync
+on:
+  schedule: [{ cron: "23 4 * * *" }]
+  workflow_dispatch: {}
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: merge a green reconcile pull request, if one is waiting
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in $(gh pr list --label fork-sync --state open --json number --jq '.[].number'); do
+            state=$(gh pr view "$n" --json mergeable,mergeStateStatus --jq '"\(.mergeable) \(.mergeStateStatus)"')
+            echo "fork-sync PR #$n: $state"
+            if [[ "$state" == *"MERGEABLE"* && "$state" != *"BLOCKED"* && "$state" != *"DIRTY"* ]]; then
+              gh pr merge "$n" --squash --delete-branch || echo "PR #$n merge failed; leaving it open"
+            else
+              echo "PR #$n not mergeable ($state); leaving it for the next run"
+            fi
+          done
+      - name: rebase main onto upstream/main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM: mksglu/context-mode
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/$UPSTREAM.git"
+          git fetch upstream main
+          UP=$(git rev-parse upstream/main)
+          if git merge-base --is-ancestor "$UP" origin/main; then
+            echo "fork main already carries upstream/main $UP; nothing to do"
+            exit 0
+          fi
+          git checkout -B sync origin/main
+          if git rebase upstream/main; then
+            git push --force-with-lease=main:origin/main origin sync:main
+            echo "rebased fork main onto upstream/main $UP"
+            exit 0
+          fi
+          # conflicting rebase: collect what conflicts, put the tree back, hand it to the agent
+          conflicts=$(git diff --name-only --diff-filter=U | sed 's/^/    /')
+          git rebase --abort
+          body=$(cat <<EOF
+          The daily rebase of fork main onto upstream/main $UP needs reconciling.
+
+          Conflicted paths:
+          $conflicts
+
+          The agentic workflow (.github/workflows/fork-sync-reconcile.md) resolves this: it rebases
+          origin/main onto upstream/main, resolves the conflicts keeping the fork's intent (the
+          shared daemon and fork-only wiring) on top of upstream's changes, runs the test suite,
+          and opens a pull request labeled \`fork-sync\`. The next fork-sync run squash-merges that
+          pull request once its checks are green, then re-linearizes main.
+          EOF
+          )
+          n=$(gh issue list --label fork-sync --state open --json number --jq 'first(.[].number // empty)')
+          if [[ -n "$n" ]]; then
+            gh issue comment "$n" --body "Rebase onto upstream/main $UP still conflicts: $conflicts"
+          else
+            gh issue create --title "fork-sync: rebase onto upstream/main needs reconciling" --label fork-sync --body "$body"
+          fi
+          echo "::error::rebase onto upstream/main $UP conflicted; issue labeled fork-sync carries the details"
+          exit 1
