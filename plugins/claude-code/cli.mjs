@@ -88,7 +88,7 @@ var require_src = __commonJS({
 
 // src/entries/cli.ts
 import { spawn as spawn4 } from "node:child_process";
-import { readFileSync as readFileSync14, realpathSync as realpathSync11 } from "node:fs";
+import { readFileSync as readFileSync12, realpathSync as realpathSync11 } from "node:fs";
 import path14 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
@@ -96,14 +96,6 @@ import { fileURLToPath as fileURLToPath3 } from "node:url";
 var SERVER_KEY = "context-mode";
 var TOOL_ORDER = Object.freeze(["ctx_execute", "ctx_batch", "ctx_index", "ctx_search", "ctx_resume", "ctx_stats", "ctx_doctor", "ctx_upgrade", "ctx_purge"]);
 var OUTPUT_CAP = 16384;
-var REPLACE_TRIGGER_BYTES_DEFAULT = 4096;
-var REPLACE_TRIGGER_ENV = "CTX_REPLACE_TRIGGER_BYTES";
-function readReplaceTrigger(raw) {
-  if (raw === void 0 || raw.trim() === "") return REPLACE_TRIGGER_BYTES_DEFAULT;
-  const n3 = Number(raw);
-  return Number.isSafeInteger(n3) && n3 > 0 ? n3 : REPLACE_TRIGGER_BYTES_DEFAULT;
-}
-var REPLACE_TRIGGER_BYTES = readReplaceTrigger(process.env[REPLACE_TRIGGER_ENV]);
 var RANGE_READ_TOOLS = Object.freeze(["Read", "view"]);
 var READ_RANGE_KEYS = Object.freeze(["offset", "limit", "view_range"]);
 var WEIGHT = Object.freeze({ toolerr: 900, decision: 700, prompt: 500, edit: 400, index: 200 });
@@ -249,6 +241,10 @@ var EXEC_LANGUAGES = Object.freeze(["shell", "powershell", "javascript", "typesc
 var SHELL_FAMILY = Object.freeze(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
 var PLAIN_OUTPUT_ENV = Object.freeze({ NO_COLOR: "1", FORCE_COLOR: "0" });
 var HOST_SESSION_ENV = Object.freeze({ "claude-code": "CLAUDE_CODE_SESSION_ID" });
+var DAEMON_HOST = "127.0.0.1";
+var DAEMON_DEFAULT_PORT = 8790;
+var DAEMON_PATH = "/mcp";
+var DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}`;
 var NODE_MIN = "24.15.0";
 var DATA_ROOT = "~/.context-mode";
 var DATA_DIR_ENV = "CONTEXT_MODE_DATA_DIR";
@@ -263,7 +259,6 @@ function readHintEvery(raw) {
   return Number.isSafeInteger(n3) && n3 > 0 ? n3 : MCP_HINT_EVERY_DEFAULT;
 }
 var MCP_HINT_EVERY = readHintEvery(process.env.CTX_MCP_HINT_EVERY);
-var SHARED_SKILLS_DIR = Object.freeze([".agents", "skills"]);
 var DENY_WHAT = Object.freeze({
   curl: "This curl/wget call",
   http: "This inline HTTP call",
@@ -325,10 +320,10 @@ var READ_MEDIA_BY_AGENT = Object.freeze({
   opencode: READ_IMAGES_AND_PDF,
   pi: READ_IMAGES,
   vscode: READ_IMAGES,
-  zcode: READ_IMAGES,
   "copilot-cli": [],
   codex: [],
-  kiro: []
+  kiro: [],
+  zcode: []
 });
 var OWN_TOOL_PREFIX = "ctx_";
 var EDIT_TOOLS = Object.freeze(["Write", "Edit"]);
@@ -382,14 +377,8 @@ var REPORT_POINTER = `ctx_search({queries:["FAIL","PASS","UNKNOWN"], source:${JS
 var GIT_LS_REMOTE_TAG_ARGS = Object.freeze(["--tags", "--refs"]);
 var RELEASE_TAG_PATTERN = "v*";
 var D1_GIT_CHECK_FIX = `git ls-remote --tags --refs ${RELEASE_REPO_URL} "${RELEASE_TAG_PATTERN}"`;
-var D2_NODE_FIX = `nvm install ${NODE_MIN.split(".")[0]}, or install it from https://nodejs.org`;
-function D2_NODE_DETAIL(version) {
-  return `Context Mode needs Node ${NODE_MIN} or newer; you have ${version}`;
-}
-var D2_SQLITE_DETAIL = "node:sqlite failed to load";
-var D2_SQLITE_FIX = "run ctx_doctor";
+var D2_NODE_FIX = `install Node ${NODE_MIN} or later`;
 var D3_PARTS = Object.freeze(["MCP entry", "hook entries", "hook timeout"]);
-var PLUGIN_MARKETPLACE_NAME = "context-mode";
 var AGENT_HOME_DIR = Object.freeze({
   "claude-code": [".claude"],
   codex: [".codex"],
@@ -422,90 +411,6 @@ var OPS_SPLIT_FILES = Object.freeze([
   "v1-remove.ts",
   "uninstall.ts"
 ]);
-var unsupported = (h2) => Object.freeze(h2);
-var UNSUPPORTED_HOSTS = Object.freeze([
-  unsupported({
-    id: "antigravity",
-    name: "Antigravity",
-    clientNames: ["antigravity", "antigravity-client", "antigravity-cli", "agy"],
-    envVars: ["ANTIGRAVITY_CLI_ALIAS"],
-    pluginPaths: [[".gemini", "config", "plugins"], [".gemini", "antigravity", "plugins"], [".gemini", "antigravity-cli", "plugins"], [".gemini", "antigravity-ide", "plugins"]],
-    configDirs: [".gemini/antigravity", ".gemini/antigravity-cli", ".gemini/config"],
-    binaries: ["agy"],
-    source: "v1.0.169:src/adapters/client-map.ts:15-17; detect.ts:156,481-483; #1340"
-  }),
-  unsupported({
-    id: "cursor",
-    name: "Cursor",
-    clientNames: ["cursor-vscode"],
-    envVars: ["CURSOR_TRACE_ID", "CURSOR_CLI", "CURSOR_CWD"],
-    pluginPaths: [],
-    configDirs: [".cursor"],
-    binaries: [],
-    source: "v1.0.169:src/adapters/client-map.ts:18; detect.ts:163-165,584"
-  }),
-  unsupported({
-    id: "omp",
-    name: "OMP (oh-my-pi)",
-    clientNames: ["omp-coding-agent"],
-    envVars: [],
-    pluginPaths: [],
-    configDirs: [".omp"],
-    binaries: ["omp"],
-    source: "v1.0.169:src/adapters/client-map.ts:37; detect.ts:543 (PI_CODING_AGENT_DIR is not a signal: supported Pi reads it too)"
-  }),
-  unsupported({
-    id: "openclaw",
-    name: "OpenClaw",
-    clientNames: [],
-    envVars: [],
-    pluginPaths: [],
-    configDirs: [".openclaw"],
-    binaries: [],
-    source: "v1.0.169:src/adapters/detect.ts:252,575 (the runtime sets no env var)"
-  }),
-  unsupported({
-    id: "kimi",
-    name: "Kimi Code",
-    clientNames: ["kimi-code", "kimi"],
-    envVars: [],
-    pluginPaths: [],
-    configDirs: [".kimi-code"],
-    binaries: ["kimi"],
-    source: "v1.0.169:src/adapters/client-map.ts:42-44; detect.ts:567; adapters/kimi/index.ts:127"
-  }),
-  unsupported({
-    id: "kilo",
-    name: "Kilo Code",
-    clientNames: ["kilo code"],
-    envVars: ["KILO", "KILO_PID"],
-    pluginPaths: [],
-    configDirs: [".config/kilo"],
-    binaries: [],
-    source: "v1.0.169:src/adapters/client-map.ts:28; detect.ts:170-171,592"
-  }),
-  unsupported({
-    id: "zed",
-    name: "Zed",
-    clientNames: ["zed"],
-    envVars: ["ZED_SESSION_ID", "ZED_TERM"],
-    pluginPaths: [],
-    configDirs: [".config/zed"],
-    binaries: [],
-    source: "v1.0.169:src/adapters/client-map.ts:38-39; detect.ts:189-190,616"
-  }),
-  unsupported({
-    id: "jetbrains-copilot",
-    name: "JetBrains Copilot",
-    clientNames: ["jetbrains client", "intellij idea", "pycharm"],
-    envVars: ["IDEA_INITIAL_DIRECTORY"],
-    pluginPaths: [],
-    configDirs: [".config/JetBrains"],
-    binaries: [],
-    source: "v1.0.169:src/adapters/client-map.ts:23-25; detect.ts:213,600"
-  })
-]);
-var SUPPORTED_AGENTS_DOCS_URL = "https://github.com/mksglu/context-mode/blob/main/docs/install/README.md";
 var HOOK_HOST_FILE = Object.freeze({
   "claude-code": { root: "plugin", file: ["hooks", "claude-code.json"], key: ["hooks"], shape: "nested", timeoutKey: "timeout", matcher: true },
   codex: { root: "home", file: [".codex", "hooks.json"], key: ["hooks"], shape: "nested", timeoutKey: "timeout", matcher: true },
@@ -579,8 +484,6 @@ var SETTINGS_FILE = "settings.json";
 var CLAUDE_USER_CONFIG_FILE = ".claude.json";
 var HOOKS_JSON_FILE = "hooks.json";
 var CLAUDE_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR";
-var SETUP_BACKUP_DIR_NAME = "backups";
-var SETUP_MANIFEST_FILE = "manifest.json";
 var CODEX_HOME_ENV = "CODEX_HOME";
 var COPILOT_HOME_ENV = "COPILOT_HOME";
 var GEMINI_CLI_HOME_ENV = "GEMINI_CLI_HOME";
@@ -665,8 +568,6 @@ var ATOMIC_TMP_MARK = ".cm-tmp-";
 var JSON_INDENT_UNIT = "  ";
 var MCP_COMMAND_FIELD = "command";
 var MCP_ARGS_FIELD = "args";
-var MCP_ENV_FIELD = "env";
-var MCP_ENV_VARS_FIELD = "env_vars";
 var ZCODE_MCP_FEATURE_KEY = Object.freeze(["features", "mcp"]);
 var CODEX_OMIT_TOOLS_FROM_FIELD = "omit_tools_from";
 var CODEX_OMIT_DEFERRED = Object.freeze(["deferred"]);
@@ -1781,51 +1682,10 @@ function getAdapter(id) {
   return BY_ID.get(id);
 }
 
-// src/core/contracts/agents.ts
-var AGENT_IDS = ["claude-code", "codex", "gemini", "qwen", "copilot-cli", "vscode", "kiro", "zcode", "pi", "opencode"];
-
-// src/core/ops/unsupported-host.ts
-var SUPPORTED_AGENTS_LINE = `Supported agents: ${AGENT_IDS.join(", ")} (${SUPPORTED_AGENTS_DOCS_URL}).`;
-function UNSUPPORTED_HOST_LINE(name) {
-  return `${name} is not a supported host today. The MCP server runs here; hooks are not checked. ${SUPPORTED_AGENTS_LINE}`;
-}
-function UNSUPPORTED_SETUP_LINE(name) {
-  return `${name} is not a supported host today. Setup writes nothing for it. ${SUPPORTED_AGENTS_LINE}`;
-}
-function segmentsOf(dir) {
-  let parts = [dir];
-  for (const sep3 of V1_PATH_SEPS) parts = parts.flatMap((p3) => p3.split(sep3));
-  return parts;
-}
-function hasRun(parts, run) {
-  for (let i2 = 0; i2 + run.length <= parts.length; i2++) if (run.every((seg, k) => parts[i2 + k] === seg)) return true;
-  return false;
-}
-function unsupportedHostOf(sig) {
-  if (sig.clientName !== void 0 && sig.clientName !== "") {
-    const n3 = sig.clientName.toLowerCase();
-    const hit = UNSUPPORTED_HOSTS.find((h2) => h2.clientNames.includes(n3));
-    if (hit !== void 0) return hit;
-  }
-  if (sig.bundleDir !== void 0) {
-    const parts = segmentsOf(sig.bundleDir);
-    const hit = UNSUPPORTED_HOSTS.find((h2) => h2.pluginPaths.some((p3) => hasRun(parts, p3)));
-    if (hit !== void 0) return hit;
-  }
-  if (sig.clientName !== void 0 && sig.clientName !== "") return void 0;
-  const env = sig.env;
-  if (env === void 0) return void 0;
-  return UNSUPPORTED_HOSTS.find((h2) => h2.envVars.some((v) => env[v] !== void 0 && env[v] !== ""));
-}
-function unsupportedHostByName(name) {
-  const n3 = name.toLowerCase();
-  return UNSUPPORTED_HOSTS.find((h2) => h2.id === n3 || h2.clientNames.includes(n3) || h2.binaries.includes(n3));
-}
-
 // src/cli/args.ts
 var COMMANDS = ["setup", "doctor", "upgrade"];
-var ALL_COMMANDS = ["setup", "doctor", "upgrade", "server", "mcp", "hook", "help"];
-var AGENT_IDS2 = ADAPTERS.map((a2) => a2.id);
+var ALL_COMMANDS = ["setup", "doctor", "upgrade", "server", "mcp", "hook", "daemon", "help"];
+var AGENT_IDS = ADAPTERS.map((a2) => a2.id);
 var COMMON = ["--help", "-h", "--json", "--yes", "-y", "--no-input", "--debug", "--quiet", "-q", "--verbose", "--no-color", "--agents"];
 var FLAGS = {
   setup: [...COMMON, "--dry-run", "--list", "--remove", "--repair", "--print"],
@@ -1836,11 +1696,6 @@ var VALUE_FLAGS = /* @__PURE__ */ new Set(["--agents", "--tag", "--print"]);
 var TAG_RE = /^[a-z0-9][a-z0-9.+-]*$/i;
 var UsageError = class extends Error {
 };
-function badAgent(name) {
-  const h2 = unsupportedHostByName(name);
-  if (h2 !== void 0) return new UsageError(UNSUPPORTED_SETUP_LINE(h2.name));
-  return new UsageError(`unknown agent "${name}".${suggest(name, AGENT_IDS2)} ${SUPPORTED_AGENTS_LINE} Run context-mode setup --list.`);
-}
 function distance(a2, b3) {
   const row = Array.from({ length: b3.length + 1 }, (_2, i2) => i2);
   for (let i2 = 1; i2 <= a2.length; i2++) {
@@ -1925,13 +1780,13 @@ function parseFlags(cmd, argv) {
         f2.tag = value;
         break;
       case "--print":
-        if (!AGENT_IDS2.includes(value)) throw badAgent(value);
+        if (!AGENT_IDS.includes(value)) throw new UsageError(`unknown agent "${value}".${suggest(value, AGENT_IDS)} Run context-mode setup --list.`);
         f2.print = value;
         break;
       case "--agents": {
         const ids = value.split(",").map((s) => s.trim()).filter(Boolean);
         for (const id of ids) {
-          if (!AGENT_IDS2.includes(id)) throw badAgent(id);
+          if (!AGENT_IDS.includes(id)) throw new UsageError(`unknown agent "${id}".${suggest(id, AGENT_IDS)} Run context-mode setup --list.`);
         }
         f2.agents = [...new Set(ids)];
         break;
@@ -1958,6 +1813,7 @@ Commands:
   doctor                      Check every agent; changes nothing
   upgrade                     Install the newest context-mode from npm, then repair each agent
   server [--agent <id>]       Run the MCP server on stdio (alias: mcp)
+  daemon [--port <n>]         Run one shared MCP server for every session (opt-in; see docs/daemon.md)
   hook --agent <id>           Run one hook call: JSON on stdin, answer on stdout
   hook <platform> <event>     Old form of hook; still works, run context-mode setup to update it
 
@@ -1970,6 +1826,7 @@ Examples:
   context-mode setup
   context-mode doctor --agents codex
   context-mode server --agent codex
+  context-mode daemon --install
 `;
 var COMMON_HELP = `  --agents <ids>     Only these agents, comma-separated (ids: context-mode setup --list)
   -y, --yes          Do not ask; apply
@@ -2033,7 +1890,7 @@ Examples:
 // src/cli/commands.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
 import { createHash as createHash2 } from "node:crypto";
-import { existsSync as existsSync18, mkdirSync as mkdirSync6, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync17, mkdirSync as mkdirSync6, writeFileSync as writeFileSync4 } from "node:fs";
 import os from "node:os";
 import path13 from "node:path";
 
@@ -4857,8 +4714,7 @@ import { basename, dirname as dirname2, join as join2, posix, resolve, win32 } f
 
 // src/core/contracts/errors.ts
 var ERROR_TEXT = Object.freeze({
-  NODE_TOO_OLD: "Context Mode needs Node 24.15.0 or newer; you have <v>. Fix: nvm install 24, or install it from https://nodejs.org.",
-  // #1328 D-NODE-OLD-1
+  NODE_TOO_OLD: "Node <v> is below 24.15.0. Fix: install Node 24.15.0 or later.",
   NO_SQLITE: "node:sqlite failed to load. Fix: run ctx_doctor.",
   DB_GONE: "context.db is gone and its WAL file is still in place. Fix: run ctx_doctor once; it keeps the WAL file in a dated folder and starts a new index.",
   // D-ORPHAN-WAL-1
@@ -4928,7 +4784,7 @@ var CtxError = class extends Error {
 };
 
 // src/core/project/config-dir.ts
-var { existsSync: existsSync2, mkdirSync, readFileSync, readdirSync: readdirSync2, realpathSync } = process.getBuiltinModule("node:fs");
+var { mkdirSync, realpathSync } = process.getBuiltinModule("node:fs");
 function homeDirOf(env, platform = process.platform) {
   const set2 = (v) => v !== void 0 && v !== "";
   if (platform === "win32") {
@@ -4982,11 +4838,6 @@ function claudeDirOf(env, home) {
   const dir = env[CLAUDE_CONFIG_DIR_ENV];
   return dir !== void 0 && dir !== "" ? dir : join2(home, ...AGENT_HOME_DIR["claude-code"]);
 }
-function claudeProfileEnv(env, platform = process.platform) {
-  const dir = env[CLAUDE_CONFIG_DIR_ENV];
-  if (dir === void 0 || dir === "" || platform === "win32") return "";
-  return `${CLAUDE_CONFIG_DIR_ENV}='${dir.split("'").join(`'"'"'`)}' `;
-}
 function opencodeDirOf(env, home) {
   const own2 = env[OPENCODE_CONFIG_DIR_ENV];
   if (own2 !== void 0 && own2 !== "") return own2;
@@ -5016,53 +4867,18 @@ function dataRootOf(env, home) {
 
 // src/core/ops/doctor-issue.ts
 import { spawnSync } from "node:child_process";
-import { closeSync as closeSync2, existsSync as existsSync10, fstatSync, mkdirSync as mkdirSync4, openSync as openSync2, readFileSync as readFileSync7, readSync as readSync2, realpathSync as realpathSync5, writeFileSync as writeFileSync2 } from "node:fs";
-import { delimiter, join as join11 } from "node:path";
+import { closeSync as closeSync2, existsSync as existsSync9, fstatSync, mkdirSync as mkdirSync4, openSync as openSync2, readFileSync as readFileSync5, readSync as readSync2, realpathSync as realpathSync5, writeFileSync as writeFileSync2 } from "node:fs";
+import { delimiter, join as join10 } from "node:path";
 
 // src/core/hooks/fallback.ts
-import { join as join5, resolve as resolve2 } from "node:path";
+import { join as join3, resolve as resolve2 } from "node:path";
 
 // src/core/policy/read-media.ts
 import { extname } from "node:path";
 var { closeSync, openSync, readSync } = process.getBuiltinModule("node:fs");
 
-// src/core/policy/own-file.ts
-import { extname as extname2, join as join4 } from "node:path";
-
-// src/core/project/contain.ts
-import { dirname as dirname3, join as join3, relative, sep } from "node:path";
-var { lstatSync: lstatSync2, realpathSync: realpathSync2 } = process.getBuiltinModule("node:fs");
-function components(p3) {
-  return p3.split(sep).filter((c3) => c3 !== "");
-}
-function reachedThroughLink(root, p3) {
-  const rel = relative(root, p3);
-  const steps = components(rel);
-  if (rel === "" || steps[0] === ".." || rel === p3) return false;
-  let at = root;
-  for (const step of steps) {
-    at = join3(at, step);
-    try {
-      if (lstatSync2(at).isSymbolicLink()) return true;
-    } catch {
-      return false;
-    }
-  }
-  return false;
-}
-
 // src/core/hooks/fallback.ts
 var fs = process.getBuiltinModule("node:fs");
-function nodeTooOld(version) {
-  const a2 = (version.startsWith("v") ? version.slice(1) : version).split(".");
-  const b3 = NODE_MIN.split(".");
-  for (let i2 = 0; i2 < b3.length; i2++) {
-    const x2 = Number(a2[i2] ?? 0) || 0;
-    const y2 = Number(b3[i2]);
-    if (x2 !== y2) return x2 < y2;
-  }
-  return false;
-}
 
 // src/core/store/schema.ts
 var PRAGMAS = `
@@ -5151,43 +4967,20 @@ CREATE VIRTUAL TABLE line_units USING fts5(
 `;
 
 // src/core/store/db.ts
-var { existsSync: existsSync3, linkSync, mkdirSync: mkdirSync2, rmSync } = process.getBuiltinModule("node:fs");
+var { existsSync: existsSync2, linkSync, mkdirSync: mkdirSync2, rmSync } = process.getBuiltinModule("node:fs");
 
 // src/core/ops/doctor-config.ts
-import { existsSync as existsSync9, readdirSync as readdirSync5, readFileSync as readFileSync6 } from "node:fs";
-import { dirname as dirname7, join as join10 } from "node:path";
-
-// src/core/ops/host-text.ts
-var BOM_CODE = 65279;
-var CR_CODE = 13;
-var CRLF = "\r\n";
-var LF = "\n";
-function hostLayout(raw) {
-  let crlf = 0;
-  let lf = 0;
-  for (let i2 = raw.indexOf(LF); i2 >= 0; i2 = raw.indexOf(LF, i2 + 1)) {
-    if (i2 > 0 && raw.charCodeAt(i2 - 1) === CR_CODE) crlf += 1;
-    else lf += 1;
-  }
-  return { bom: raw.length > 0 && raw.charCodeAt(0) === BOM_CODE, crlf: crlf > 0 && crlf >= lf };
-}
-function hostText(raw) {
-  const bare = raw.length > 0 && raw.charCodeAt(0) === BOM_CODE ? raw.slice(1) : raw;
-  return bare.indexOf(CRLF) < 0 ? bare : bare.split(CRLF).join(LF);
-}
-function withLayout(text2, layout) {
-  const eol = layout.crlf ? text2.split(LF).join(CRLF) : text2;
-  return layout.bom ? String.fromCharCode(BOM_CODE) + eol : eol;
-}
+import { existsSync as existsSync8, readdirSync as readdirSync4 } from "node:fs";
+import { join as join9 } from "node:path";
 
 // src/core/ops/detect-v1.ts
-import { existsSync as existsSync6, opendirSync, readdirSync as readdirSync3, readFileSync as readFileSync3 } from "node:fs";
+import { existsSync as existsSync5, opendirSync, readdirSync as readdirSync2, readFileSync as readFileSync2 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join8 } from "node:path";
+import { join as join7 } from "node:path";
 
 // src/core/ops/host-config.ts
-import { existsSync as existsSync5, readFileSync as readFileSync2 } from "node:fs";
-import { dirname as dirname5, join as join7 } from "node:path";
+import { existsSync as existsSync4, readFileSync } from "node:fs";
+import { dirname as dirname4, join as join5 } from "node:path";
 
 // node_modules/eslint-visitor-keys/lib/visitor-keys.js
 var KEYS2 = {
@@ -7296,9 +7089,32 @@ function atomicWriteFile(file, text2, opts = {}) {
 }
 
 // src/core/ops/bundle-dir.ts
-import { existsSync as existsSync4 } from "node:fs";
-import { dirname as dirname4, join as join6 } from "node:path";
+import { existsSync as existsSync3 } from "node:fs";
+import { dirname as dirname3, join as join4 } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// src/core/ops/host-text.ts
+var BOM_CODE = 65279;
+var CR_CODE = 13;
+var CRLF = "\r\n";
+var LF = "\n";
+function hostLayout(raw) {
+  let crlf = 0;
+  let lf = 0;
+  for (let i2 = raw.indexOf(LF); i2 >= 0; i2 = raw.indexOf(LF, i2 + 1)) {
+    if (i2 > 0 && raw.charCodeAt(i2 - 1) === CR_CODE) crlf += 1;
+    else lf += 1;
+  }
+  return { bom: raw.length > 0 && raw.charCodeAt(0) === BOM_CODE, crlf: crlf > 0 && crlf >= lf };
+}
+function hostText(raw) {
+  const bare = raw.length > 0 && raw.charCodeAt(0) === BOM_CODE ? raw.slice(1) : raw;
+  return bare.indexOf(CRLF) < 0 ? bare : bare.split(CRLF).join(LF);
+}
+function withLayout(text2, layout) {
+  const eol = layout.crlf ? text2.split(LF).join(CRLF) : text2;
+  return layout.bom ? String.fromCharCode(BOM_CODE) + eol : eol;
+}
 
 // src/core/ops/host-config.ts
 function stripJsonComments(text2) {
@@ -7670,6 +7486,28 @@ function editHostConfigText(agent, path15, text2, format, wanted) {
   return applyEdits(agent, path15, text2, format, wanted);
 }
 
+// src/core/project/contain.ts
+import { dirname as dirname5, join as join6, relative, sep } from "node:path";
+var { lstatSync: lstatSync2, realpathSync: realpathSync2 } = process.getBuiltinModule("node:fs");
+function components(p3) {
+  return p3.split(sep).filter((c3) => c3 !== "");
+}
+function reachedThroughLink(root, p3) {
+  const rel = relative(root, p3);
+  const steps = components(rel);
+  if (rel === "" || steps[0] === ".." || rel === p3) return false;
+  let at = root;
+  for (const step of steps) {
+    at = join6(at, step);
+    try {
+      if (lstatSync2(at).isSymbolicLink()) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 // src/core/ops/detect-v1.ts
 var isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 var keyPath = (...parts) => parts.join(".");
@@ -7713,14 +7551,14 @@ function stripJsonc(text2) {
 }
 function readJson(file) {
   try {
-    return JSON.parse(stripJsonc(hostText(readFileSync3(file, "utf8"))));
+    return JSON.parse(stripJsonc(hostText(readFileSync2(file, "utf8"))));
   } catch {
     return void 0;
   }
 }
 function readText(file) {
   try {
-    return hostText(readFileSync3(file, "utf8"));
+    return hostText(readFileSync2(file, "utf8"));
   } catch {
     return "";
   }
@@ -7777,7 +7615,7 @@ function flatCommands(events2, prefix) {
 var isV1Hook = (cmd) => cmd.includes(SERVER_KEY) && (V1_SCRIPT_NAMES.some((name) => cmd.includes(name)) || cmd.includes(V1_HOOK_COMMAND));
 var isCodexScript = (cmd) => cmd.includes(V1_SCRIPT_EXT) && V1_PATH_SEPS.some((sep3) => cmd.includes(V1_CODEX_HOOKS_DIR.join(sep3) + sep3));
 function dataDir(dir, reason, out2) {
-  if (existsSync6(dir)) out2.push(finding(dir, "", reason));
+  if (existsSync5(dir)) out2.push(finding(dir, "", reason));
 }
 function mcpEntry(file, doc, out2) {
   if (isObj(doc) && isObj(doc[MCP_SERVERS_KEY]) && Object.hasOwn(doc[MCP_SERVERS_KEY], SERVER_KEY)) {
@@ -7785,7 +7623,7 @@ function mcpEntry(file, doc, out2) {
   }
 }
 function claudeShapeSettings(agentHome, out2) {
-  const file = join8(agentHome, SETTINGS_FILE);
+  const file = join7(agentHome, SETTINGS_FILE);
   const doc = readJson(file);
   for (const c3 of nestedCommands(doc)) {
     if (c3.command.includes(V1_CACHE_HEAL_NAME)) out2.push(finding(file, c3.path, V1_REASON.cacheHealHook));
@@ -7805,64 +7643,63 @@ function v1HookFile(file, out2) {
 function scanClaudeCode(home, agentHome, out2) {
   claudeShapeSettings(agentHome, out2);
   for (const ext of V1_CACHE_HEAL_EXTS) {
-    const file = join8(agentHome, V1_HOOKS_DIR_NAME, V1_CACHE_HEAL_NAME + ext);
-    if (existsSync6(file)) out2.push(finding(file, "", V1_REASON.cacheHealFile));
+    const file = join7(agentHome, V1_HOOKS_DIR_NAME, V1_CACHE_HEAL_NAME + ext);
+    if (existsSync5(file)) out2.push(finding(file, "", V1_REASON.cacheHealFile));
   }
-  const userFile = join8(home, CLAUDE_USER_CONFIG_FILE);
+  const userFile = join7(home, CLAUDE_USER_CONFIG_FILE);
   mcpEntry(userFile, readJson(userFile), out2);
-  dataDir(join8(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
+  dataDir(join7(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
 }
 function scanCodex(agentHome, out2) {
-  const hooksFile = join8(agentHome, HOOKS_JSON_FILE);
+  const hooksFile = join7(agentHome, HOOKS_JSON_FILE);
   for (const c3 of nestedCommands(readJson(hooksFile))) {
     if (c3.command.includes(V1_CODEX_HOOK_COMMAND) || isCodexScript(c3.command)) {
       out2.push(finding(hooksFile, c3.path, V1_REASON.codexHook));
     }
   }
-  const tomlFile = join8(agentHome, CONFIG_TOML_FILE);
+  const tomlFile = join7(agentHome, CONFIG_TOML_FILE);
   const config = readTomlValue(tomlFile);
   for (const span of readTomlTables(tomlFile)) {
     if (span.path[0] !== V1_TOML_SECTION_ROOT || span.path[1] !== SERVER_KEY) continue;
     if (span.path.length === 2 && isV2McpTable(hostConfigValueAt(config, span.path))) continue;
-    if (span.path.length === 3 && span.path[2] === MCP_ENV_FIELD && isV2McpTable(hostConfigValueAt(config, span.path.slice(0, 2)))) continue;
     out2.push(finding(tomlFile, span.header.trim(), V1_REASON.codexToml));
   }
-  dataDir(join8(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
+  dataDir(join7(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
 }
 function scanGemini(agentHome, out2) {
-  const file = join8(agentHome, SETTINGS_FILE);
+  const file = join7(agentHome, SETTINGS_FILE);
   for (const c3 of nestedCommands(readJson(file))) {
     if (c3.command.includes(SERVER_KEY)) out2.push(finding(file, c3.path, V1_REASON.hook));
   }
-  dataDir(join8(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDirShared, out2);
+  dataDir(join7(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDirShared, out2);
 }
 function scanVscode(agentHome, project, out2) {
   if (project !== void 0) {
-    v1HookFile(join8(project, GITHUB_DIR_NAME, V1_HOOKS_DIR_NAME, OWN_HOOK_FILE), out2);
-    const mcpFile = join8(project, VSCODE_DIR_NAME, VSCODE_MCP_FILE);
+    v1HookFile(join7(project, GITHUB_DIR_NAME, V1_HOOKS_DIR_NAME, OWN_HOOK_FILE), out2);
+    const mcpFile = join7(project, VSCODE_DIR_NAME, VSCODE_MCP_FILE);
     const doc = readJson(mcpFile);
     const servers = isObj(doc) && isObj(doc[VSCODE_MCP_SERVERS_KEY]) ? doc[VSCODE_MCP_SERVERS_KEY] : {};
     const entry2 = Object.hasOwn(servers, SERVER_KEY) ? servers[SERVER_KEY] : void 0;
     if (isObj(entry2) && (entry2.command === V1_BIN_COMMAND || listOf(entry2.args).some((a2) => a2 === V1_BIN_COMMAND))) {
       out2.push(finding(mcpFile, keyPath(VSCODE_MCP_SERVERS_KEY, SERVER_KEY), V1_REASON.vscodeMcp));
     }
-    const sessions = join8(project, GITHUB_DIR_NAME, V1_DATA_DIR_NAME, V1_SESSIONS_DIR_NAME);
+    const sessions = join7(project, GITHUB_DIR_NAME, V1_DATA_DIR_NAME, V1_SESSIONS_DIR_NAME);
     dataDir(sessions, reachedThroughLink(project, sessions) ? V1_REASON.projectLink : V1_REASON.dataDir, out2);
   }
-  dataDir(join8(agentHome, V1_DATA_DIR_NAME, V1_SESSIONS_DIR_NAME), V1_REASON.dataDir, out2);
+  dataDir(join7(agentHome, V1_DATA_DIR_NAME, V1_SESSIONS_DIR_NAME), V1_REASON.dataDir, out2);
 }
 function jsonFiles(dir) {
   try {
-    return readdirSync3(dir).filter((name) => name.endsWith(KIRO_AGENT_FILE_EXT)).sort();
+    return readdirSync2(dir).filter((name) => name.endsWith(KIRO_AGENT_FILE_EXT)).sort();
   } catch {
     return [];
   }
 }
 function scanKiro(agentHome, project, out2) {
-  const agentsDir = join8(agentHome, KIRO_AGENTS_DIR);
-  const defaultFile = join8(agentHome, ...KIRO_AGENT_FILE);
+  const agentsDir = join7(agentHome, KIRO_AGENTS_DIR);
+  const defaultFile = join7(agentHome, ...KIRO_AGENT_FILE);
   for (const name of jsonFiles(agentsDir)) {
-    const file = join8(agentsDir, name);
+    const file = join7(agentsDir, name);
     const doc = readJson(file);
     if (isObj(doc) && doc[KIRO_AGENT_NAME_KEY] === SERVER_KEY) {
       out2.push(finding(file, "", V1_REASON.kiroAgentFile));
@@ -7873,31 +7710,31 @@ function scanKiro(agentHome, project, out2) {
       if (isV1Hook(c3.command)) out2.push(finding(file, c3.path, V1_REASON.kiroHook));
     }
   }
-  const steeringDocs = [join8(agentHome, ...KIRO_STEERING_FILE)];
-  if (project !== void 0) steeringDocs.push(join8(project, ...AGENT_HOME_DIR.kiro, ...KIRO_STEERING_FILE));
+  const steeringDocs = [join7(agentHome, ...KIRO_STEERING_FILE)];
+  if (project !== void 0) steeringDocs.push(join7(project, ...AGENT_HOME_DIR.kiro, ...KIRO_STEERING_FILE));
   for (const file of steeringDocs) {
-    if (existsSync6(file)) out2.push(finding(file, "", V1_REASON.kiroSteering));
+    if (existsSync5(file)) out2.push(finding(file, "", V1_REASON.kiroSteering));
   }
-  dataDir(join8(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
+  dataDir(join7(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
 }
 function piNpmIsCurrent(piAgentDir) {
-  const doc = readJson(join8(piAgentDir, PI_NPM_DIR, PI_NODE_MODULES_DIR, SERVER_KEY, PI_PACKAGE_JSON_FILE));
+  const doc = readJson(join7(piAgentDir, PI_NPM_DIR, PI_NODE_MODULES_DIR, SERVER_KEY, PI_PACKAGE_JSON_FILE));
   const version = isObj(doc) && typeof doc.version === "string" ? doc.version : "";
   return Number.parseInt(version, 10) >= PI_CURRENT_MAJOR;
 }
 function scanPi(piAgentDir, agentHome, out2) {
-  const file = join8(piAgentDir, SETTINGS_FILE);
+  const file = join7(piAgentDir, SETTINGS_FILE);
   const doc = readJson(file);
   listOf(isObj(doc) ? doc[PI_PACKAGES_KEY] : void 0).forEach((pkg, i2) => {
     const spec = isObj(pkg) ? pkg[PI_PACKAGE_SOURCE_KEY] : pkg;
     if (spec === V1_PI_PACKAGE && !piNpmIsCurrent(piAgentDir)) out2.push(finding(file, keyPath(PI_PACKAGES_KEY, i2), V1_REASON.piNpm));
     if (spec === PI_GIT_PACKAGE) out2.push(finding(file, keyPath(PI_PACKAGES_KEY, i2), V1_REASON.piGit));
   });
-  dataDir(join8(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
+  dataDir(join7(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
 }
 function scanOpencode(agentHome, out2) {
   for (const name of OPENCODE_CONFIG_FILES) {
-    const file = join8(agentHome, name);
+    const file = join7(agentHome, name);
     const doc = readJson(file);
     if (!isObj(doc) || !Array.isArray(doc[OPENCODE_PLUGIN_KEY])) continue;
     doc[OPENCODE_PLUGIN_KEY].forEach((spec, i2) => {
@@ -7908,13 +7745,13 @@ function scanOpencode(agentHome, out2) {
   }
 }
 function scanZcode(agentHome, out2) {
-  const configFile = join8(agentHome, ZCODE_CLI_DIR, CONFIG_JSON_FILE);
+  const configFile = join7(agentHome, ZCODE_CLI_DIR, CONFIG_JSON_FILE);
   const config = readJson(configFile);
   const events2 = isObj(config) && isObj(config[HOOKS_KEY]) ? config[HOOKS_KEY][ZCODE_EVENTS_KEY] : void 0;
   for (const c3 of flatCommands(events2, [HOOKS_KEY, ZCODE_EVENTS_KEY])) {
     if (c3.command.includes(V1_HOOK_COMMAND)) out2.push(finding(configFile, c3.path, V1_REASON.zcodeHook));
   }
-  const hooksFile = join8(agentHome, ZCODE_CLI_DIR, HOOKS_JSON_FILE);
+  const hooksFile = join7(agentHome, ZCODE_CLI_DIR, HOOKS_JSON_FILE);
   for (const c3 of nestedCommands(readJson(hooksFile))) {
     if (c3.command.includes(V1_HOOK_COMMAND)) out2.push(finding(hooksFile, c3.path, V1_REASON.zcodeHook));
   }
@@ -7938,14 +7775,14 @@ function firstTmpMatch(dir) {
   }
 }
 function scanAll(home, tmp, out2) {
-  const root = join8(home, DATA_ROOT.slice(1));
-  for (const name of V1_DATA_ROOT_ENTRIES) dataDir(join8(root, name), V1_REASON.dataRoot, out2);
+  const root = join7(home, DATA_ROOT.slice(1));
+  for (const name of V1_DATA_ROOT_ENTRIES) dataDir(join7(root, name), V1_REASON.dataRoot, out2);
   if (firstTmpMatch(tmp) !== null) out2.push(finding(tmp, V1_TMP_PREFIX + "*", V1_REASON.tmpFile));
 }
 function detectV1(agent, home, scope = {}) {
   const out2 = [];
   const project = scope.project;
-  const agentHome = agent === "claude-code" && scope.claudeDir !== void 0 ? scope.claudeDir : agent === "codex" && scope.codexDir !== void 0 ? scope.codexDir : agent === "gemini" && scope.geminiDir !== void 0 ? scope.geminiDir : agent === "copilot-cli" && scope.copilotDir !== void 0 ? scope.copilotDir : agent === "kiro" && scope.kiroDir !== void 0 ? scope.kiroDir : agent === "opencode" && scope.opencodeDir !== void 0 ? scope.opencodeDir : join8(home, ...AGENT_HOME_DIR[agent]);
+  const agentHome = agent === "claude-code" && scope.claudeDir !== void 0 ? scope.claudeDir : agent === "codex" && scope.codexDir !== void 0 ? scope.codexDir : agent === "gemini" && scope.geminiDir !== void 0 ? scope.geminiDir : agent === "copilot-cli" && scope.copilotDir !== void 0 ? scope.copilotDir : agent === "kiro" && scope.kiroDir !== void 0 ? scope.kiroDir : agent === "opencode" && scope.opencodeDir !== void 0 ? scope.opencodeDir : join7(home, ...AGENT_HOME_DIR[agent]);
   switch (agent) {
     case "claude-code":
       scanClaudeCode(home, agentHome, out2);
@@ -7958,11 +7795,11 @@ function detectV1(agent, home, scope = {}) {
       break;
     case "qwen":
       claudeShapeSettings(agentHome, out2);
-      dataDir(join8(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
+      dataDir(join7(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
       break;
     case "copilot-cli":
-      v1HookFile(join8(agentHome, V1_HOOKS_DIR_NAME, OWN_HOOK_FILE), out2);
-      dataDir(join8(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
+      v1HookFile(join7(agentHome, V1_HOOKS_DIR_NAME, OWN_HOOK_FILE), out2);
+      dataDir(join7(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
       break;
     case "vscode":
       scanVscode(agentHome, project, out2);
@@ -7971,7 +7808,7 @@ function detectV1(agent, home, scope = {}) {
       scanKiro(agentHome, project, out2);
       break;
     case "pi":
-      scanPi(scope.piAgentDir !== void 0 && scope.piAgentDir !== "" ? scope.piAgentDir : join8(agentHome, PI_AGENT_DIR), agentHome, out2);
+      scanPi(scope.piAgentDir !== void 0 && scope.piAgentDir !== "" ? scope.piAgentDir : join7(agentHome, PI_AGENT_DIR), agentHome, out2);
       break;
     // D-WIN-PIDIR-1: empty is unset
     case "opencode":
@@ -7986,12 +7823,12 @@ function detectV1(agent, home, scope = {}) {
 }
 
 // src/core/ops/plugin-root.ts
-import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync4, realpathSync as realpathSync3 } from "node:fs";
-import { dirname as dirname6, isAbsolute, join as join9, sep as sep2 } from "node:path";
+import { existsSync as existsSync6, readdirSync as readdirSync3, readFileSync as readFileSync3, realpathSync as realpathSync3 } from "node:fs";
+import { dirname as dirname6, isAbsolute, join as join8, sep as sep2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // src/setup/pi-gate.ts
-import { existsSync as existsSync8, readFileSync as readFileSync5, realpathSync as realpathSync4 } from "node:fs";
+import { existsSync as existsSync7, readFileSync as readFileSync4, realpathSync as realpathSync4 } from "node:fs";
 import path3 from "node:path";
 var OWN_FILE = "pi/index.js";
 var EXTENSIONS_KEY = "extensions";
@@ -8000,9 +7837,9 @@ var TRUST_FILE = "trust.json";
 var ALWAYS = "always";
 var SOURCE_PREFIXES = ["npm:", "git:"];
 function load(file) {
-  if (!existsSync8(file)) return void 0;
+  if (!existsSync7(file)) return void 0;
   try {
-    return { file, doc: parseHostConfig("pi", file, hostText(readFileSync5(file, "utf8")), "json") };
+    return { file, doc: parseHostConfig("pi", file, hostText(readFileSync4(file, "utf8")), "json") };
   } catch {
     return void 0;
   }
@@ -8110,7 +7947,7 @@ function formUrl(title, summary) {
 }
 
 // src/setup/registry.ts
-import { existsSync as existsSync11, realpathSync as realpathSync6 } from "node:fs";
+import { existsSync as existsSync10, realpathSync as realpathSync6 } from "node:fs";
 import path4 from "node:path";
 
 // src/setup/hook-shapes.ts
@@ -8170,7 +8007,7 @@ var SERVER_BUNDLE = "server.mjs";
 var HOOK_BUNDLE = "hook.mjs";
 var AGENT_FLAG = "--agent";
 var LOCK_FILE = "setup.lock";
-var BACKUP_DIR = SETUP_BACKUP_DIR_NAME;
+var BACKUP_DIR = "backups";
 var PLUGIN_ID = `${SERVER_KEY}@${SERVER_KEY}`;
 var SKILLS_DIR_NAME = "skills";
 var INSTRUCTION_FILES = Object.freeze([
@@ -8247,7 +8084,7 @@ var NATIVE_PLUGIN = {
 };
 var CELLAR_SEGMENT = "/Cellar/";
 var NODE_BIN = ["bin", "node"];
-var REAL_FS = { exists: existsSync11, real: (p3) => realpathSync6.native(p3) };
+var REAL_FS = { exists: existsSync10, real: (p3) => realpathSync6.native(p3) };
 function stableNodePath(execPath, fs2 = REAL_FS) {
   const at = execPath.indexOf(CELLAR_SEGMENT);
   if (at < 0) return execPath;
@@ -8287,10 +8124,7 @@ function configFor(ctx, id) {
     const file = id === "vscode" ? ownMcpFileOf(id, own2.file, ctx.env, ctx.home) : agentPath(ctx, id, own2.file);
     const format = file.endsWith(".toml") ? "toml" : id === "vscode" ? "jsonc" : "json";
     const also = own2.also?.map(([k, v]) => [k, v]);
-    const codexHome = id === "codex" ? ctx.env[CODEX_HOME_ENV2] : void 0;
-    const base = ownMcpValue(id, node, server);
-    const value = codexHome !== void 0 && codexHome !== "" ? { ...base, [MCP_ENV_FIELD]: { [CODEX_HOME_ENV2]: codexHome } } : base;
-    return { file, format, key: own2.key, value, ...also ? { also } : {} };
+    return { file, format, key: own2.key, value: ownMcpValue(id, node, server), ...also ? { also } : {} };
   }
   if (id === "opencode") {
     return {
@@ -8324,16 +8158,7 @@ function cliFor(ctx, id) {
 function copyFor(ctx, id) {
   if (id !== "claude-code") return void 0;
   const file = path4.join(claudeDirOf(ctx.env, ctx.home), HOST_PLUGINS_DIR_NAME, INSTALLED_PLUGINS_FILE);
-  return {
-    host: "Claude Code",
-    bin: "claude",
-    plugin: PLUGIN_ID,
-    file,
-    refresh: ["plugin", "update", PLUGIN_ID],
-    enable: ["plugin", "enable", PLUGIN_ID],
-    marketplace: ["plugin", "marketplace", "update", PLUGIN_MARKETPLACE_NAME],
-    profile: claudeProfileEnv(ctx.env, ctx.platform ?? process.platform)
-  };
+  return { host: "Claude Code", bin: "claude", plugin: PLUGIN_ID, file, refresh: ["plugin", "update", PLUGIN_ID], enable: ["plugin", "enable", PLUGIN_ID] };
 }
 var LIST = {
   "claude-code": { bin: "claude", args: ["plugin", "list"] },
@@ -8449,7 +8274,7 @@ function assertWritable(row, file) {
 }
 
 // src/setup/gemini-gate.ts
-import { existsSync as existsSync12, readFileSync as readFileSync8 } from "node:fs";
+import { existsSync as existsSync11, readFileSync as readFileSync6 } from "node:fs";
 import path5 from "node:path";
 var GEMINI_DIR = ".gemini";
 var SETTINGS_FILE2 = "settings.json";
@@ -8469,9 +8294,9 @@ function systemDefaultsPath(env) {
   return set2 ? set2 : path5.join(path5.dirname(systemSettingsPath(env)), SYSTEM_DEFAULTS_FILE);
 }
 function load2(file) {
-  if (!existsSync12(file)) return void 0;
+  if (!existsSync11(file)) return void 0;
   try {
-    return { file, doc: parseHostConfig(OWN_AGENT, file, hostText(readFileSync8(file, "utf8")), "jsonc") };
+    return { file, doc: parseHostConfig(OWN_AGENT, file, hostText(readFileSync6(file, "utf8")), "jsonc") };
   } catch {
     return void 0;
   }
@@ -8503,7 +8328,7 @@ function geminiSettingsGate(env, home, cwd) {
 }
 
 // src/setup/zcode-gate.ts
-import { existsSync as existsSync13, readFileSync as readFileSync9 } from "node:fs";
+import { existsSync as existsSync12, readFileSync as readFileSync7 } from "node:fs";
 import path6 from "node:path";
 var OWN_AGENT2 = "zcode";
 var EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure", "Stop"];
@@ -8595,10 +8420,10 @@ function zcodeSchemaBad(doc) {
 }
 function zcodeConfigGate(home) {
   const file = path6.join(home, ".zcode", "cli", "config.json");
-  if (!existsSync13(file)) return void 0;
+  if (!existsSync12(file)) return void 0;
   let doc;
   try {
-    doc = parseHostConfig(OWN_AGENT2, file, hostText(readFileSync9(file, "utf8")), "json");
+    doc = parseHostConfig(OWN_AGENT2, file, hostText(readFileSync7(file, "utf8")), "json");
   } catch {
     return void 0;
   }
@@ -8608,7 +8433,7 @@ function zcodeConfigGate(home) {
 }
 
 // src/setup/vscode-gate.ts
-import { existsSync as existsSync14, readFileSync as readFileSync10 } from "node:fs";
+import { existsSync as existsSync13, readFileSync as readFileSync8 } from "node:fs";
 import path7 from "node:path";
 var SETTINGS_FILE3 = "settings.json";
 var WORKSPACE_DIR = ".vscode";
@@ -8617,9 +8442,9 @@ var LOCATIONS_KEY = "chat.hookFilesLocations";
 var OWN_LOCATION = "~/.copilot/hooks";
 var MANAGED_KEYS = ["allowManagedHooksOnly", "strictPluginOnlyCustomization"];
 function load3(file) {
-  if (!existsSync14(file)) return void 0;
+  if (!existsSync13(file)) return void 0;
   try {
-    return { file, doc: parseHostConfig("vscode", file, hostText(readFileSync10(file, "utf8")), "jsonc") };
+    return { file, doc: parseHostConfig("vscode", file, hostText(readFileSync8(file, "utf8")), "jsonc") };
   } catch {
     return void 0;
   }
@@ -8659,7 +8484,7 @@ function vscodeSettingsGate(env, home, cwd, managedFile = managedSettingsPath(en
 }
 
 // src/setup/qwen-gate.ts
-import { existsSync as existsSync15, readFileSync as readFileSync11 } from "node:fs";
+import { existsSync as existsSync14, readFileSync as readFileSync9 } from "node:fs";
 import path8 from "node:path";
 var KEY = "disableAllHooks";
 var SETTINGS = "settings.json";
@@ -8675,10 +8500,10 @@ function settingsFiles(env, home, cwd, platform) {
 }
 function qwenHooksOff(env, home, cwd = process.cwd(), platform = process.platform) {
   for (const file of settingsFiles(env, home, cwd, platform)) {
-    if (!existsSync15(file)) continue;
+    if (!existsSync14(file)) continue;
     let value;
     try {
-      value = hostConfigValueAt(parseHostConfig("qwen", file, hostText(readFileSync11(file, "utf8")), "jsonc"), [KEY]);
+      value = hostConfigValueAt(parseHostConfig("qwen", file, hostText(readFileSync9(file, "utf8")), "jsonc"), [KEY]);
     } catch {
       continue;
     }
@@ -8689,7 +8514,7 @@ function qwenHooksOff(env, home, cwd = process.cwd(), platform = process.platfor
 
 // src/setup/codex-trust.ts
 import { createHash } from "node:crypto";
-import { existsSync as existsSync16, realpathSync as realpathSync7 } from "node:fs";
+import { existsSync as existsSync15, realpathSync as realpathSync7 } from "node:fs";
 import path10 from "node:path";
 import { spawn, spawnSync as spawnSync3 } from "node:child_process";
 
@@ -8798,7 +8623,7 @@ function snake(name) {
 function realFile(file) {
   let dir = path10.resolve(file);
   const rest = [];
-  while (!existsSync16(dir) && path10.dirname(dir) !== dir) {
+  while (!existsSync15(dir) && path10.dirname(dir) !== dir) {
     rest.unshift(path10.basename(dir));
     dir = path10.dirname(dir);
   }
@@ -9098,7 +8923,7 @@ function listCopilotHooks(env, file, cwd) {
 
 // src/setup/engine.ts
 import { spawn as spawn3, spawnSync as spawnSync4 } from "node:child_process";
-import { closeSync as closeSync3, existsSync as existsSync17, mkdirSync as mkdirSync5, mkdtempSync, openSync as openSync3, readFileSync as readFileSync12, readSync as readSync3, readdirSync as readdirSync6, realpathSync as realpathSync9, rmSync as rmSync2, statSync as statSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { closeSync as closeSync3, existsSync as existsSync16, mkdirSync as mkdirSync5, mkdtempSync, openSync as openSync3, readFileSync as readFileSync10, readSync as readSync3, readdirSync as readdirSync5, realpathSync as realpathSync9, rmSync as rmSync2, statSync as statSync2, writeFileSync as writeFileSync3 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import path12 from "node:path";
 
@@ -9173,7 +8998,7 @@ var HOOK_ROUNDS = 5;
 var P95 = 0.95;
 var VERIFY_TIMEOUT_MS = 1e4;
 var INSTALL_TIMEOUT_MS = 12e4;
-var MANIFEST = SETUP_MANIFEST_FILE;
+var MANIFEST = "manifest.json";
 var MANIFEST_DONE = "manifest.removed.json";
 var FILES = "files";
 var V1_HOOK_MARK = "context-mode hook";
@@ -9196,9 +9021,9 @@ function isNativeBinary(file) {
 function owningPackage(dir) {
   for (let d = dir; ; d = path12.dirname(d)) {
     const f2 = path12.join(d, "package.json");
-    if (existsSync17(f2)) {
+    if (existsSync16(f2)) {
       try {
-        return String(JSON.parse(hostText(readFileSync12(f2, "utf8"))).name);
+        return String(JSON.parse(hostText(readFileSync10(f2, "utf8"))).name);
       } catch {
         return void 0;
       }
@@ -9214,7 +9039,7 @@ function hostBin(bin, env, platform = process.platform) {
   for (const dir of pathEntries(get("PATH") ?? "", platform)) {
     const own2 = which(bin, { PATH: dir, ...get("PATHEXT") ? { PATHEXT: get("PATHEXT") } : {} }, platform);
     for (const f2 of [own2, ...real2.extra.map((p3) => path12.join(dir, ...p3))]) {
-      if (!f2 || !existsSync17(f2) || !statSync2(f2).isFile()) continue;
+      if (!f2 || !existsSync16(f2) || !statSync2(f2).isFile()) continue;
       const file = realpathSync9(f2);
       if (isNativeBinary(file) || owningPackage(path12.dirname(file)) === real2.pkg) return { file, shims };
       shims.push(f2);
@@ -9231,10 +9056,10 @@ function runBin(bin, args, env, input, timeout = VERIFY_TIMEOUT_MS) {
   return spawnShim(hostBin(bin, env).file ?? bin, args, env, { encoding: "utf8", input, timeout, maxBuffer: Infinity });
 }
 function readOr(file) {
-  return existsSync17(file) ? hostText(readFileSync12(file, "utf8")) : void 0;
+  return existsSync16(file) ? hostText(readFileSync10(file, "utf8")) : void 0;
 }
 function readRaw(file) {
-  return existsSync17(file) ? readFileSync12(file, "utf8") : void 0;
+  return existsSync16(file) ? readFileSync10(file, "utf8") : void 0;
 }
 var atomicWrite = atomicWriteFile;
 function pidAlive(pid) {
@@ -9379,7 +9204,7 @@ function isNativeSpec(e) {
 function isStaleOwnPlugin(e, entry2) {
   if (typeof e !== "string" || e === entry2 || !path12.isAbsolute(e)) return false;
   if (e === path12.join(entry2, ...OPENCODE_PLUGIN_PATH)) return true;
-  if (existsSync17(e)) return false;
+  if (existsSync16(e)) return false;
   const seg = e.split("\\").join("/").split("/");
   const n3 = seg.length;
   if (n3 >= 3 && seg[n3 - 1] === "plugin.js" && seg[n3 - 2] === "opencode" && seg[n3 - 3] === "context-mode") return true;
@@ -9443,8 +9268,8 @@ function planSkills(row, edits) {
   const s = row.skillInstall;
   if (s.kind !== "dir") return;
   for (const f2 of s.files) {
-    if (!existsSync17(f2.src)) throw new Error(`preflight: ${f2.src} is missing`);
-    const after = renderSkill(readFileSync12(f2.src, "utf8"), s.prefixes);
+    if (!existsSync16(f2.src)) throw new Error(`preflight: ${f2.src} is missing`);
+    const after = renderSkill(readFileSync10(f2.src, "utf8"), s.prefixes);
     const before = readRaw(f2.file);
     if (before !== after) edits.push({ plain: true, file: f2.file, before, after, changes: [{ file: f2.file, path: f2.name, before: before === void 0 ? null : "old", after: "SKILL.md" }] });
   }
@@ -9456,7 +9281,7 @@ function planRow(row, listed, stale, env, disabled = false) {
     const before = readOr(c3.file);
     let res;
     try {
-      res = editHostConfigText(row.id, c3.file, before ?? "", c3.format, ownConfigEdits(row, c3, before ?? ""));
+      res = editHostConfigText(row.id, c3.file, before ?? "", c3.format, configEdits(c3));
     } catch (e) {
       if (e instanceof CtxError) throw new Error(parseFail(row, c3.file));
       throw e;
@@ -9470,7 +9295,7 @@ function planRow(row, listed, stale, env, disabled = false) {
   planHookInstall(row, edits, env);
   planSkills(row, edits);
   const cli = row.config || !row.cli || listed ? [] : row.cli.install;
-  const refresh = listed && stale && row.copy ? [row.copy.marketplace, row.copy.refresh] : [];
+  const refresh = listed && stale && row.copy ? [row.copy.refresh] : [];
   if (listed && disabled && row.copy) refresh.push(row.copy.enable);
   return { edits, cli, refresh };
 }
@@ -9578,16 +9403,13 @@ function hookEnabledCheck(row, status) {
 }
 function packageVersion(pkgDir) {
   try {
-    const v = JSON.parse(hostText(readFileSync12(path12.join(pkgDir, "package.json"), "utf8"))).version;
+    const v = JSON.parse(hostText(readFileSync10(path12.join(pkgDir, "package.json"), "utf8"))).version;
     return typeof v === "string" ? v : void 0;
   } catch {
     return void 0;
   }
 }
-function copyFix(c3) {
-  return `${c3.profile}${c3.bin} ${c3.marketplace.join(" ")} && ${c3.profile}${c3.bin} ${c3.refresh.join(" ")}`;
-}
-function staleCopy(row, pkgDir) {
+function copyCheck(row, pkgDir) {
   const c3 = row.copy;
   const pkg = packageVersion(pkgDir);
   const text2 = c3 ? readOr(c3.file) : void 0;
@@ -9597,32 +9419,14 @@ function staleCopy(row, pkgDir) {
     const doc = JSON.parse(text2);
     entries = isObj5(doc) && isObj5(doc.plugins) ? doc.plugins[c3.plugin] : void 0;
   } catch {
-    return { name: "copy", ok: false, detail: `${c3.file} is not valid JSON; run ${copyFix(c3)}` };
+    return { name: "copy", ok: false, detail: `${c3.file} is not valid JSON; run ${c3.bin} ${c3.refresh.join(" ")}` };
   }
   if (!Array.isArray(entries)) return void 0;
   const versions = entries.filter(isObj5).map((e) => e.version).filter((v) => typeof v === "string");
   if (!versions.length) return void 0;
   const old = versions.find((v) => v !== pkg);
-  return old === void 0 ? { name: "copy", ok: true } : { old, pkg };
-}
-function copyCheck(row, pkgDir) {
-  const r2 = staleCopy(row, pkgDir);
-  if (r2 === void 0 || "name" in r2) return r2;
-  const c3 = row.copy;
-  return { name: "copy", ok: false, detail: `${c3.host} runs context-mode ${r2.old}, the installed package is ${r2.pkg}; run ${copyFix(c3)}` };
-}
-function copyWarn(row, pkgDir, refreshNotes) {
-  const r2 = staleCopy(row, pkgDir);
-  if (r2 === void 0 || "name" in r2) return void 0;
-  const c3 = row.copy;
-  const why = refreshNotes.length ? ` (${refreshNotes.join("; ")})` : "";
-  return { name: "copy", ok: true, warn: true, detail: `${c3.host} still runs context-mode ${r2.old}, the installed package is ${r2.pkg}${why}; run ${copyFix(c3)}` };
-}
-function degradedDetail(node, env) {
-  const r2 = spawnSync4(node, ["-p", "process.version"], { env, encoding: "utf8", timeout: VERIFY_TIMEOUT_MS, windowsHide: true });
-  const v = `${r2.stdout ?? ""}`.trim();
-  if (v && nodeTooOld(v)) return `Node too old: ${D2_NODE_DETAIL(v)}. Fix: ${D2_NODE_FIX}`;
-  return `only ctx_doctor is served: ${D2_SQLITE_DETAIL} under ${node}${v ? ` ${v}` : ""}. Fix: ${D2_SQLITE_FIX}`;
+  if (old === void 0) return { name: "copy", ok: true };
+  return { name: "copy", ok: false, detail: `${c3.host} runs context-mode ${old}, the installed package is ${pkg}; run ${c3.bin} ${c3.refresh.join(" ")}` };
 }
 function mcpCheck(cmd, env) {
   return new Promise((resolve3) => {
@@ -9664,7 +9468,7 @@ function mcpCheck(cmd, env) {
           const want = [...TOOL_ORDER].sort();
           const got = [...tools].sort();
           const ok = JSON.stringify(got) === JSON.stringify(want);
-          done(ok, ok ? void 0 : got.length === 1 && got[0] === "ctx_doctor" ? degradedDetail(cmd[0], env) : `tools/list returned ${got.join(",")}, expected ${want.join(",")}`);
+          done(ok, ok ? void 0 : `tools/list returned ${got.join(",")}, expected ${want.join(",")}`);
         }
       }
     });
@@ -9715,29 +9519,11 @@ function hookCheck(row, env) {
   }
   return best;
 }
-function ownConfigEdits(row, c3, text2) {
-  const edits = configEdits(c3);
-  if (row.id !== "codex" || !isObj5(c3.value)) return edits;
-  let cur;
-  try {
-    cur = hostConfigValueAt(parseHostConfig(row.id, c3.file, text2, c3.format), c3.key);
-  } catch {
-    return edits;
-  }
-  if (!isObj5(cur)) return edits;
-  const value = { ...c3.value };
-  const userEnv = cur[MCP_ENV_FIELD];
-  const ownEnv = value[MCP_ENV_FIELD];
-  if (isObj5(userEnv) || isObj5(ownEnv)) value[MCP_ENV_FIELD] = { ...isObj5(userEnv) ? userEnv : {}, ...isObj5(ownEnv) ? ownEnv : {} };
-  if (Array.isArray(cur[MCP_ENV_VARS_FIELD])) value[MCP_ENV_VARS_FIELD] = cur[MCP_ENV_VARS_FIELD];
-  return [[c3.key, value], ...edits.slice(1)];
-}
 function parseCheck(row) {
   const c3 = row.config;
   if (!c3) return { name: "parse", ok: true };
   try {
-    const text2 = readOr(c3.file) ?? "";
-    const r2 = editHostConfigText(row.id, c3.file, text2, c3.format, ownConfigEdits(row, c3, text2));
+    const r2 = editHostConfigText(row.id, c3.file, readOr(c3.file) ?? "", c3.format, configEdits(c3));
     return { name: "parse", ok: r2.edits.length === 0, detail: r2.edits.length ? "entry differs after write" : void 0 };
   } catch (e) {
     return { name: "parse", ok: false, detail: e.message };
@@ -9788,7 +9574,7 @@ var SEEN_SQL = "SELECT 1 FROM events WHERE agent = ? LIMIT 1";
 var NOT_SEEN_LINE = "not seen yet, run one tool call";
 function hookSeenCheck(row, dataRoot) {
   const base = path12.join(dataRoot, PROJECTS_DIR_NAME);
-  const dirs = existsSync17(base) ? readdirSync6(base) : [];
+  const dirs = existsSync16(base) ? readdirSync5(base) : [];
   let sqlite;
   try {
     sqlite = process.getBuiltinModule("node:sqlite");
@@ -9797,7 +9583,7 @@ function hookSeenCheck(row, dataRoot) {
   }
   for (const d of dirs) {
     const file = path12.join(base, d, DB_FILE_NAME);
-    if (!sqlite || !existsSync17(file)) continue;
+    if (!sqlite || !existsSync16(file)) continue;
     let db;
     try {
       db = new sqlite.DatabaseSync(file, { readOnly: true });
@@ -9814,17 +9600,17 @@ function skillsCheck(row, pkgDir) {
   const s = row.skillInstall;
   if (s.kind === "package") {
     const files = COMMAND_SKILLS.map((n3) => path12.join(pkgDir, s.via, n3, SKILL_FILE));
-    const miss = files.filter((f2) => !existsSync17(f2));
+    const miss = files.filter((f2) => !existsSync16(f2));
     if (miss.length) return { name: "skills", ok: false, detail: `missing ${miss.join(", ")}` };
     const own2 = getAdapter(row.id).toolNamePrefix + SKILL_TOOL_STEM;
     const foreign = [...new Set(ADAPTERS.map((r2) => r2.toolNamePrefix + SKILL_TOOL_STEM))].filter((n3) => n3 !== SKILL_TOOL_STEM && n3 !== own2);
     const bad2 = files.filter((f2) => {
-      const t2 = readFileSync12(f2, "utf8");
+      const t2 = readFileSync10(f2, "utf8");
       return !t2.includes(own2) && foreign.some((n3) => t2.includes(n3));
     });
     return { name: "skills", ok: bad2.length === 0, detail: bad2.length ? `${bad2.join(", ")} without the ${own2}* tool name` : void 0 };
   }
-  const bad = s.files.filter((f2) => readRaw(f2.file) !== (existsSync17(f2.src) ? renderSkill(readFileSync12(f2.src, "utf8"), s.prefixes) : void 0));
+  const bad = s.files.filter((f2) => readRaw(f2.file) !== (existsSync16(f2.src) ? renderSkill(readFileSync10(f2.src, "utf8"), s.prefixes) : void 0));
   return { name: "skills", ok: bad.length === 0, detail: bad.length ? `${bad.map((f2) => f2.file).join(", ")} missing or without the ${s.prefixes.join(" / ") || "plain"} tool prefix` : void 0 };
 }
 var CODEX_CONFIG_FILE2 = "config.toml";
@@ -10104,7 +9890,7 @@ function undo(dir, entries, env) {
       continue;
     }
     if (!e.file) continue;
-    if (e.existed && e.backup) atomicWrite(e.file, readFileSync12(path12.join(dir, e.backup), "utf8"));
+    if (e.existed && e.backup) atomicWrite(e.file, readFileSync10(path12.join(dir, e.backup), "utf8"));
     else unlinkWithRetry(e.file);
   }
 }
@@ -10119,7 +9905,7 @@ function takeLock(root, runId) {
       if (e.code !== "EEXIST") throw e;
       let pid = 0;
       try {
-        pid = Number(JSON.parse(readFileSync12(file, "utf8")).pid);
+        pid = Number(JSON.parse(readFileSync10(file, "utf8")).pid);
       } catch {
       }
       if (pid && pidAlive(pid)) return `setup lock ${file} is held by pid ${pid}; wait for that run or remove the lock`;
@@ -10137,16 +9923,14 @@ function agentHomeDir(id, ctx) {
   return path12.join(ctx.home, ...AGENT_HOME_DIR[id]);
 }
 function detectAgents(reg, ctx) {
-  return reg.filter((r2) => existsSync17(agentHomeDir(r2.id, ctx)) || r2.listCommand && which(r2.listCommand.bin, ctx.env)).map((r2) => r2.id);
+  return reg.filter((r2) => existsSync16(agentHomeDir(r2.id, ctx)) || r2.listCommand && which(r2.listCommand.bin, ctx.env)).map((r2) => r2.id);
 }
 async function runSetup(opts) {
   const ctx = { home: opts.home, pkgDir: opts.pkgDir, env: opts.env };
   const runId = opts.runId ?? (/* @__PURE__ */ new Date()).toISOString().split(":").join("-").split(".").join("-");
   const reg = buildRegistry(ctx);
-  const nodeVersion = opts.nodeVersion ?? process.version;
-  if (nodeTooOld(nodeVersion)) return { exitCode: 1, agents: [], error: formatError("NODE_TOO_OLD", { v: nodeVersion }) };
   for (const f2 of ["server.mjs", "hook.mjs"]) {
-    if (!existsSync17(path12.join(ctx.pkgDir, f2))) return { exitCode: 1, agents: [], error: `preflight: ${path12.join(ctx.pkgDir, f2)} is missing` };
+    if (!existsSync16(path12.join(ctx.pkgDir, f2))) return { exitCode: 1, agents: [], error: `preflight: ${path12.join(ctx.pkgDir, f2)} is missing` };
   }
   const ids = opts.agents ?? detectAgents(reg, ctx);
   const root = dataRootOf(ctx.env, ctx.home);
@@ -10217,23 +10001,13 @@ async function setupRow(row, ctx, run, dryRun) {
       if (!installExitOk(r2.status, r2.status === WIN_EXIT_CRASH && listCheck(row, ctx.env)?.ok === true)) throw new Error(`${row.cli.bin} ${args.join(" ")} exited ${r2.status}: ${`${r2.stderr}`.trim()}`);
     }
     if (plan.cli.length) for (const args of row.cli.remove) run.record({ agent: row.id, undo: { bin: row.cli.bin, args } });
-    const refreshNotes = [];
     for (const args of plan.refresh) {
       const r2 = runBin(row.cli.bin, args, ctx.env, void 0, INSTALL_TIMEOUT_MS);
-      const failed = `${row.cli.bin} ${args.join(" ")} exited ${r2.status}: ${`${r2.stderr}`.trim()}`;
-      if (r2.status !== 0 && !isCopyRefresh(row, args)) throw new Error(failed);
-      if (r2.status !== 0) {
-        refreshNotes.push(failed);
-        continue;
-      }
+      if (r2.status !== 0) throw new Error(`${row.cli.bin} ${args.join(" ")} exited ${r2.status}: ${`${r2.stderr}`.trim()}`);
       run.record({ agent: row.id, ran: { bin: row.cli.bin, args } });
     }
     res.changes.push(...await enableCopilotHooks(row, ctx, run));
     res.checks = await verifyRow(row, ctx);
-    if (plan.refresh.length) {
-      const w = copyWarn(row, ctx.pkgDir, refreshNotes);
-      if (w) res.checks = res.checks.map((c3) => c3.name === "copy" ? w : c3);
-    }
     const bad = res.checks.filter((c3) => !c3.ok);
     if (bad.length) throw new Error(bad.map((c3) => `${c3.name}: ${c3.detail}`).join("; "));
   } catch (e) {
@@ -10250,7 +10024,7 @@ async function runDoctor(opts) {
   const ctx = { home: opts.home, pkgDir: opts.pkgDir, env: opts.env };
   const reg = buildRegistry(ctx);
   for (const f2 of ["server.mjs", "hook.mjs"]) {
-    if (!existsSync17(path12.join(ctx.pkgDir, f2))) return { exitCode: 1, agents: [], error: `preflight: ${path12.join(ctx.pkgDir, f2)} is missing` };
+    if (!existsSync16(path12.join(ctx.pkgDir, f2))) return { exitCode: 1, agents: [], error: `preflight: ${path12.join(ctx.pkgDir, f2)} is missing` };
   }
   const ids = opts.agents ?? detectAgents(reg, ctx);
   const run = new Run(dataRootOf(ctx.env, ctx.home), "doctor");
@@ -10310,12 +10084,7 @@ function isRefresh(row, c3) {
   const r2 = row.copy;
   if (r2 === void 0 || c3.command === void 0) return false;
   const cmd = c3.command.join(" ");
-  return isCopyRefresh(row, c3.command.slice(1)) || cmd === [r2.bin, ...r2.enable].join(" ");
-}
-function isCopyRefresh(row, args) {
-  const r2 = row.copy;
-  const a2 = args.join(" ");
-  return r2 !== void 0 && (a2 === r2.refresh.join(" ") || a2 === r2.marketplace.join(" "));
+  return cmd === [r2.bin, ...r2.refresh].join(" ") || cmd === [r2.bin, ...r2.enable].join(" ");
 }
 function isTrust(row, c3) {
   const h2 = row.hookInstall;
@@ -10325,14 +10094,14 @@ function runRemove(opts) {
   const env = opts.env ?? process.env;
   const root = dataRootOf(env, opts.home);
   const base = path12.join(root, BACKUP_DIR);
-  if (!existsSync17(base)) return { exitCode: 0, restored: 0 };
+  if (!existsSync16(base)) return { exitCode: 0, restored: 0 };
   const held = takeLock(root, "remove");
   if (held) return { exitCode: 1, restored: 0, error: held };
   let restored = 0;
   try {
-    const runs = readdirSync6(base).map((r2) => path12.join(base, r2)).filter((d) => existsSync17(path12.join(d, MANIFEST))).sort().reverse();
+    const runs = readdirSync5(base).map((r2) => path12.join(base, r2)).filter((d) => existsSync16(path12.join(d, MANIFEST))).sort().reverse();
     for (const dir of runs) {
-      const m3 = JSON.parse(readFileSync12(path12.join(dir, MANIFEST), "utf8"));
+      const m3 = JSON.parse(readFileSync10(path12.join(dir, MANIFEST), "utf8"));
       undo(dir, m3.entries, env);
       restored += m3.entries.length;
       renameWithRetry(path12.join(dir, MANIFEST), path12.join(dir, MANIFEST_DONE));
@@ -10344,7 +10113,7 @@ function runRemove(opts) {
 }
 
 // src/setup/print.ts
-import { readFileSync as readFileSync13 } from "node:fs";
+import { readFileSync as readFileSync11 } from "node:fs";
 var SHELL_SAFE_PUNCT = "@%+=:,./-_";
 function isShellSafe(s) {
   if (s === "") return false;
@@ -10372,7 +10141,7 @@ function printPlan(row, env) {
   else if (h2.kind === "plugin-list") steps.push({ kind: "hook", file: h2.file, block: JSON.stringify({ [h2.key[0]]: [h2.entry] }, null, 2) + "\n" });
   const sk = row.skillInstall;
   if (sk.kind === "dir") {
-    for (const f2 of sk.files) steps.push({ kind: "skill", file: f2.file, block: renderSkill(readFileSync13(f2.src, "utf8"), sk.prefixes) });
+    for (const f2 of sk.files) steps.push({ kind: "skill", file: f2.file, block: renderSkill(readFileSync11(f2.src, "utf8"), sk.prefixes) });
   }
   return { agent: row.id, steps, verify: `context-mode doctor --agents ${row.id}` };
 }
@@ -10675,10 +10444,6 @@ async function setup(ui) {
   if (f2.print) return printManual(ui, f2.print);
   if (f2.list) return list(ui);
   if (f2.remove) return remove(ui);
-  if (nodeTooOld(process.version)) {
-    err(`context-mode: ${formatError("NODE_TOO_OLD", { v: process.version })}`);
-    return EXIT_FAIL;
-  }
   if (f2.dryRun) {
     const plan = await apply(ui, f2.agents, true);
     if (f2.json) out(JSON.stringify({ command: "setup", dryRun: true, ...plan }));
@@ -10743,13 +10508,11 @@ async function doctor(ui) {
     }
   });
   spin.stop();
-  const other = res.agents.length === 0 ? unsupportedHostOf({ env: process.env }) : void 0;
-  if (other !== void 0 && !ui.f.json) out(UNSUPPORTED_HOST_LINE(other.name));
   if (!res.agents.length && !res.error && !ui.f.json) {
     out("No agents found. Run context-mode setup --list.");
     return EXIT_OK;
   }
-  const code = await finish({ ...ui, clack: void 0 }, "doctor", other === void 0 ? res : { ...res, unsupportedHost: other.id }, false);
+  const code = await finish({ ...ui, clack: void 0 }, "doctor", res, false);
   const p3 = ui.clack;
   if (!p3 || code === EXIT_OK) return code;
   let worst = code;
@@ -10800,7 +10563,7 @@ async function upgrade(ui) {
   }
   const root = `${spawnSync5(npm, ["root", "-g"], { env: ui.ctx.env, encoding: "utf8", shell, windowsHide: true }).stdout ?? ""}`.trim();
   const cli = path13.join(root, "context-mode", "cli.mjs");
-  if (!root || !existsSync18(cli)) {
+  if (!root || !existsSync17(cli)) {
     err(`FAIL upgrade: ${cli} not found after ${install}. Fix: ${install}`);
     return EXIT_FAIL;
   }
@@ -10857,6 +10620,7 @@ var EXIT_USAGE2 = 2;
 var EXIT_SIGINT2 = 130;
 var SERVER_FILE = "server.mjs";
 var HOOK_FILE = "hook.mjs";
+var DAEMON_FILE = "daemon.mjs";
 var PACKAGE_FILE = "package.json";
 var V1_PLATFORM_AGENT = Object.freeze({
   "claude-code": "claude-code",
@@ -10880,6 +10644,7 @@ function route(argv, version) {
   if (cmd === void 0 || cmd === "-h" || cmd === "--help" || cmd === "help") return { kind: "exit", code: EXIT_OK2, stdout: HELP2 };
   if (cmd === "-v" || cmd === "--version") return { kind: "exit", code: EXIT_OK2, stdout: version + "\n" };
   if (cmd === "server" || cmd === "mcp") return { kind: "run", file: SERVER_FILE, args: rest };
+  if (cmd === "daemon") return { kind: "run", file: DAEMON_FILE, args: rest };
   if (cmd === "hook") {
     if (rest.includes(AGENT_ARG)) return { kind: "run", file: HOOK_FILE, args: rest };
     const [platform = ""] = rest;
@@ -10898,7 +10663,7 @@ function main() {
   const dir = path14.dirname(realpathSync11(fileURLToPath3(import.meta.url)));
   let version = "";
   try {
-    version = String(JSON.parse(readFileSync14(path14.join(dir, PACKAGE_FILE), "utf8")).version);
+    version = String(JSON.parse(readFileSync12(path14.join(dir, PACKAGE_FILE), "utf8")).version);
   } catch (err2) {
     process.stderr.write(`${SERVER_KEY}: cannot read ${PACKAGE_FILE}: ${err2.message}
 `);
