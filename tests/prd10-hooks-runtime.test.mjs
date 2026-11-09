@@ -443,6 +443,47 @@ describe("PRD-v2 section 10: dispatch, replace and handle line (GP3, GP6)", () =
     }
   });
 
+  // D-M7-RR-3b: an MCP tool names the call in its own keys (web_search: objective + search_queries;
+  // ctx_*: a literal intent). Before, none of those keys was read, so every MCP replace printed
+  // queries:["",...] and ranked on the prompt alone.
+  test("D-M7-RR-3b: an MCP web_search input keeps objective and search_queries as the intent, never an empty query", async () => {
+    const p = cc({
+      hook_event_name: "PostToolUse", tool_name: "mcp__parallel__web_search",
+      tool_input: { objective: "openssl fips build steps", search_queries: ["openssl fips", "go boringcrypto"] },
+      tool_use_id: "toolu_ws", tool_response: bigText(40000),
+    });
+    const out = parsed(await handleHook("claude-code", p, env));
+    assert.equal(typeof out.updatedToolOutput, "string", "an MCP string result replaces as a string");
+    const replaced = out.updatedToolOutput;
+    const more = replaced.slice(replaced.lastIndexOf("\n" + CCP + "ctx_search("));
+    assert.ok(!more.includes('[""]'), "no empty query: " + more);
+    assert.ok(more.includes("openssl fips build steps"), "the first query is the objective: " + more);
+  });
+
+  test("D-M7-RR-3b: an MCP tool with only a query list joins it as the intent", async () => {
+    const p = cc({
+      hook_event_name: "PostToolUse", tool_name: "mcp__search__lookup",
+      tool_input: { queries: ["alpha beta", "gamma"] }, tool_use_id: "toolu_ql", tool_response: bigText(40000),
+    });
+    const out = parsed(await handleHook("claude-code", p, env));
+    const more = out.updatedToolOutput.slice(out.updatedToolOutput.lastIndexOf("\n" + CCP + "ctx_search("));
+    assert.ok(!more.includes('[""]'), "no empty query: " + more);
+    assert.ok(more.includes("alpha beta"), "the joined query list is the intent: " + more);
+  });
+
+  // D-CC-USER-MCP-1: a user-scope or project-scope `claude mcp add context-mode` names the tools
+  // mcp__context-mode__ctx_*; before, only the plugin prefix was stripped, the own-tool exemption
+  // (step 1, ADR-0009 §0) missed the call, and the hook replaced ctx_execute's own reply with a
+  // pointer to itself — the "mangled search tool" loop.
+  test("D-CC-USER-MCP-1: a plain mcp add context-mode ctx_execute result is never replaced", async () => {
+    const p = cc({
+      hook_event_name: "PostToolUse", tool_name: "mcp__context-mode__ctx_execute",
+      tool_input: { language: "shell", code: "cat big.log", intent: "read the log" },
+      tool_use_id: "toolu_own", tool_response: bigText(40000),
+    });
+    assert.equal(parsed(await handleHook("claude-code", p, env)), null, "own tool over the trigger is allowed whole");
+  });
+
   // D-R41-READ-OFFSET-1 (#1314, joucarvalho): "Read with offset/limit over 4 KB comes back as a 96 B ctx_search pointer".
   // A bounded Read is the user's own small window: the host's result reaches the model whole. A full Read still replaces.
   test("D-R41-READ-OFFSET-1: a Read with offset or limit over REPLACE_TRIGGER_BYTES is never replaced (#1314)", async () => {

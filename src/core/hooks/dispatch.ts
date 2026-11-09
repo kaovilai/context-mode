@@ -61,6 +61,12 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
+// D-M7-RR-3b: a query-list field (web_search's search_queries) reads as its joined words, so a
+// search-shaped MCP input keeps a query when no single-string key names the call.
+function listStr(v: unknown): string {
+  return Array.isArray(v) ? v.filter((q): q is string => typeof q === "string" && q.trim() !== "").join(" ") : "";
+}
+
 /** impl/09 §4.2. Never throws: decode, project and dispatch failures all end in this agent's allow shape. */
 export async function handleHook(agent: AgentId, raw: unknown, env: NodeJS.ProcessEnv): Promise<HookOutput> {
   if (!isAgentId(agent)) {
@@ -467,7 +473,13 @@ async function postReplace(ev: CanonicalHookEvent, row: AdapterRow, project: Pro
     label = mainLabel(tool, ev);
   }
   // D-M7-RR-3: no description -> the command text, file path, pattern or URL, never an empty query.
-  const intent = [tool.input.description, tool.input.command, tool.input.file_path, tool.input.pattern, tool.input.url]
+  // MCP tools name the call in their own keys: ctx_* carries a literal intent (and objective, path,
+  // query), the common web-search servers an objective and a query list. Those keys are read too, so an
+  // MCP call never indexes under an empty query and the handle line's first query is the call's own words
+  // (before: every MCP replace printed queries:["",...] and ranked on the prompt alone).
+  const intent = [tool.input.description, tool.input.command, tool.input.file_path, tool.input.pattern, tool.input.url,
+    tool.input.intent, tool.input.objective, tool.input.query, tool.input.path, tool.input.prompt,
+    listStr(tool.input.search_queries) || listStr(tool.input.queries)]
     .map(str).find((v) => v.trim() !== "") ?? "";
   // One chunk pass for both forms (D-M7-FT-2): the stored chunks and the selected chunks are the same
   // array, so the in-memory selection equals selectChunks over the stored source without reading it back.
