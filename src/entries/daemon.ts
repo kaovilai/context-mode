@@ -475,7 +475,7 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
     // routing, with the -32601 a 2025-era-only server gives — the client then negotiates the
     // sessionful leg, where roots/list is deliverable (see discoverSteer).
     if (req.method === "POST") {
-      const steer = discoverSteer(Buffer.from(body).toString("utf8"));
+      const steer = discoverSteer(Buffer.from(body.buffer, body.byteOffset, body.byteLength).toString("utf8")); // zero-copy view: readBody already holds the bytes
       if (steer !== null) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ jsonrpc: "2.0", id: steer.id, error: { code: -32601, message: "Method not found" } }));
