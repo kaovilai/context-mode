@@ -29,7 +29,7 @@ import { AGENT_IDS, type AgentId } from "../core/contracts/agents.ts";
 import { CLIENT_NAME_TO_PLATFORM, PLATFORM_TO_AGENT } from "../core/contracts/client-map.ts";
 import {
   DAEMON_ADD_COMMAND, DAEMON_AGENT_HEADER, DAEMON_DEFAULT_PORT, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PATH, DAEMON_SESSION_HEADER,
-  DAEMON_PORT_ENV, DAEMON_UNIT_DIR, DAEMON_UNIT_NAME, DAEMON_WORKSPACE_HEADER, HOST_SESSION_ENV, WORKSPACE_FOLDER_FLAG,
+  DAEMON_PORT_ENV, DAEMON_UNIT_DIR, DAEMON_UNIT_NAME, DAEMON_WORKSPACE_HEADER, DISCOVER_METHOD, CLIENT_CAPABILITIES_META, HOST_SESSION_ENV, WORKSPACE_FOLDER_FLAG,
 } from "../core/contracts/constants.ts";
 import { homeDirOf } from "../core/project/config-dir.ts";
 import { markDaemonPort } from "../core/ops/daemon-state.ts";
@@ -147,6 +147,31 @@ function sessionHeaderOf(req: ServerContext): string | undefined {
  * (C:\ or C:/) or UNC (\\server\share); a relative path or a bare word is ignored (D-A26-ws-1). */
 export function isAbsoluteWorkspacePath(raw: string): boolean {
   return raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith("\\\\");
+}
+
+/** A26-r14: the discover probe to steer, or null. A probe is steered when its declared client
+ * capabilities include roots: such a client can answer roots/list, but only on the 2025-era
+ * sessionful leg — on the 2026-07-28 per-request-envelope era the SDK cannot deliver
+ * server-to-client requests ("roots/list cannot be sent while serving a request on that revision"),
+ * so decision 3's roots-based workspace resolution silently never ran. Every steerable client that
+ * negotiated the modern era (Claude Code does: it probes server/discover first) therefore fell
+ * through to the daemon-cwd workspace — under the systemd unit that is $HOME — pooling every
+ * session of every project into one project DB where the default "worktree" search scope matched
+ * every row: cross-session, cross-project search results and source handles that named another
+ * session's rows. The daemon answers the probe with -32601, the answer of a 2025-era-only server
+ * (the SDK registers no discover handler without modern versions), and the client negotiates the
+ * sessionful leg, where roots/list answers and the project resolves per session. A client that
+ * declares no roots cannot help resolve the workspace either way and keeps the modern era.
+ * Pure: body text in, the probe's id out (null for anything else, including batches). */
+export function discoverSteer(body: string): { id: string | number } | null {
+  let msg: unknown;
+  try { msg = JSON.parse(body); } catch { return null; }
+  if (msg === null || typeof msg !== "object" || Array.isArray(msg)) return null;
+  const m = msg as { method?: unknown; id?: unknown; params?: { _meta?: Record<string, unknown> } | undefined };
+  if (m.method !== DISCOVER_METHOD || typeof m.id !== "string" && typeof m.id !== "number") return null;
+  const caps = m.params?._meta?.[CLIENT_CAPABILITIES_META];
+  if (caps === null || typeof caps !== "object" || Array.isArray(caps)) return null;
+  return (caps as Record<string, unknown>).roots === undefined ? null : { id: m.id };
 }
 
 /** ADR-0026 decision 3: per-request routing for the daemon (see the file header). */
@@ -446,6 +471,17 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
     res.once("close", () => abort.abort());
     const body = await readBody(req, res);
     if (body === null) return; // over the cap: readBody already answered 413
+    // A26-r14: a discover probe from a roots-capable client is answered here, before the era
+    // routing, with the -32601 a 2025-era-only server gives — the client then negotiates the
+    // sessionful leg, where roots/list is deliverable (see discoverSteer).
+    if (req.method === "POST") {
+      const steer = discoverSteer(Buffer.from(body.buffer, body.byteOffset, body.byteLength).toString("utf8")); // zero-copy view: readBody already holds the bytes
+      if (steer !== null) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: steer.id, error: { code: -32601, message: "Method not found" } }));
+        return;
+      }
+    }
     const request = toWebRequest(req, port, body, abort.signal);
     const response = (await isLegacyRequest(request)) ? await legacyHandle(request) : await modern.fetch(request);
     await sendResponse(res, response);
