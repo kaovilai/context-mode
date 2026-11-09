@@ -132,6 +132,19 @@ describe("PRD-v2 section 10: dispatch, replace and handle line (GP3, GP6)", () =
     assert.ok(cap.lines[0].startsWith("hooks: decode failed: "));
   });
 
+  // D-CC-USER-MCP-1 (review round): the dual-prefix pick reads the payload before decodeClaudeShape's object
+  // guard, so a non-object payload must still fail with that guard's own line, not a bare TypeError.
+  test("decode failure: a null payload keeps the JSON-object error line", async () => {
+    for (const bad of [null, undefined, 3]) {
+      const cap = captureStderr();
+      let out;
+      try { out = await handleHook("claude-code", bad, env); } finally { cap.restore(); }
+      assert.deepEqual(out, { stdout: "", exitCode: 0 }, JSON.stringify(bad));
+      assert.equal(cap.lines.length, 1, JSON.stringify(bad));
+      assert.ok(cap.lines[0].includes("hook payload is not a JSON object"), cap.lines[0]);
+    }
+  });
+
   test("no project: allow, no hint, no DB", async () => {
     const bare = { HOME: root, USERPROFILE: root, PATH: process.env.PATH };
     const out = await handleHook("claude-code", cc({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "curl https://x.y" } }), bare);
@@ -469,6 +482,24 @@ describe("PRD-v2 section 10: dispatch, replace and handle line (GP3, GP6)", () =
     const more = out.updatedToolOutput.slice(out.updatedToolOutput.lastIndexOf("\n" + CCP + "ctx_search("));
     assert.ok(!more.includes('[""]'), "no empty query: " + more);
     assert.ok(more.includes("alpha beta"), "the joined query list is the intent: " + more);
+  });
+
+  // D-NO-LOSSY-CUT-2 (review round): the intent is echoed in the handle line, and an MCP tool can carry a
+  // multi-KB prompt. The picked intent is cut to ECHO_MAX_BYTES, so the replace stays a pointer, never a
+  // string the size of the output it replaced.
+  test("D-M7-RR-3b: a multi-KB MCP prompt is cut to ECHO_MAX_BYTES, the replace stays small", async () => {
+    const huge = "summarize " + "x".repeat(20000);
+    const p = cc({
+      hook_event_name: "PostToolUse", tool_name: "mcp__gen__summarize",
+      tool_input: { prompt: huge }, tool_use_id: "toolu_hp", tool_response: bigText(26000),
+    });
+    const out = parsed(await handleHook("claude-code", p, env));
+    assert.equal(typeof out.updatedToolOutput, "string");
+    const replaced = out.updatedToolOutput;
+    assert.ok(Buffer.byteLength(replaced) < 1024, "the replace stays a pointer: " + Buffer.byteLength(replaced) + " B");
+    const more = replaced.slice(replaced.lastIndexOf("\n" + CCP + "ctx_search("));
+    assert.ok(!more.includes('[""]'), "no empty query after the cut: " + more);
+    assert.ok(!more.includes("x".repeat(300)), "the echoed intent is cut at ECHO_MAX_BYTES, not whole: " + more.slice(0, 200));
   });
 
   // D-CC-USER-MCP-1: a user-scope or project-scope `claude mcp add context-mode` names the tools

@@ -251,7 +251,10 @@ export function decode(raw: unknown): CanonicalHookEvent {
   requireFields(raw);
   // The plugin install and a plain `claude mcp add context-mode` name the same tools with different mcp__
   // prefixes, so the own prefix follows the tool name (the zcode dual-prefix pattern, D-R44-ZCODE-NATIVE-1).
-  const toolName = typeof (raw as { tool_name?: unknown }).tool_name === "string" ? (raw as { tool_name: string }).tool_name : "";
+  // The payload is read defensively: a non-object raw keeps decodeClaudeShape's own "hook payload is not a
+  // JSON object" line (a bare .tool_name read would throw first and replace it with a TypeError).
+  const p = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const toolName = typeof p.tool_name === "string" ? p.tool_name : "";
   const ownPrefix = toolName.startsWith(USER_MCP_TOOL_NAME_PREFIX) ? USER_MCP_TOOL_NAME_PREFIX : TOOL_NAME_PREFIX;
   const ev = decodeClaudeShape(raw, "claude-code", ownPrefix, CLAUDE_SOURCES);
   // D-CC-PWSH-1: PowerShell keeps its native name and is decided, replaced and encoded as canonical Bash.

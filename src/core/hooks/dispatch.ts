@@ -6,7 +6,7 @@ const { lstatSync, readFileSync } = process.getBuiltinModule("node:fs") as typeo
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { AGENT_IDS, type AgentId } from "../contracts/agents.ts";
 import {
-  COMPACTED_META_PREFIX, COMPACT_POINTER_LINE, COMPACT_STATE_KEY, DECISION_OPTION_KEY, DECISION_SOURCE, DECISION_TOOL, EDIT_PATH_KEYS, EDIT_TOOLS, EXIT_CODE_LINE_PREFIX,
+  COMPACTED_META_PREFIX, COMPACT_POINTER_LINE, COMPACT_STATE_KEY, DECISION_OPTION_KEY, DECISION_SOURCE, DECISION_TOOL, EDIT_PATH_KEYS, EDIT_TOOLS, ECHO_MAX_BYTES, EXIT_CODE_LINE_PREFIX,
   OWN_TOOL_PREFIX, prefixToolNames, REPLACE_CHUNK_BYTES, REPLACE_HANDLE_LINE, REPLACE_RETURN_BYTES, REPLACE_TRIGGER_BYTES, RANGE_READ_TOOLS, READ_PATH_KEYS, READ_RANGE_KEYS, SHAPE_RETURN_BYTES, PARSE_ERROR_DENY_LINE, PENDING_COMPACT_FLAG, PENDING_COMPACT_KEY,
   PENDING_COMPACT_META_PREFIX, POLICY_UNREADABLE_LINE, RECALL_KEY, RECALL_MAX_ROWS, RECALL_SEEN_META_PREFIX, RECALL_UNIT_CANDIDATES, RECALL_UNITS_SEEN_META_PREFIX, RESUME_HINT, RESUME_HINT_KEY, RUN_WRAPPER_FILE,
   RUN_WRAPPER_NODE, SHELL_TOOL, SOURCE_LABEL_MAX_CHARS, SUBAGENT_SOURCE_PREFIX, SYNC_INDEX_MAX_BYTES, TOOL_PREFIX_SLOT,
@@ -27,7 +27,7 @@ import { isInside } from "../project/contain.ts";
 import { metaGet, metaSet, metaTake, openDb } from "../store/db.ts";
 import { appendEvent, canonicalKey } from "../journal/append.ts";
 import { hasAgentRows, hasSessionRows, readLastPrompt, readRecallRows, readSessionEvents } from "../journal/read.ts";
-import { finishReserved, insertChunks, insertUnits, queryUnits, recallQueryText, reserveSource, sourceHandle, type SourceDraft } from "../store/fts.ts";
+import { finishReserved, headBytes, insertChunks, insertUnits, queryUnits, recallQueryText, reserveSource, sourceHandle, type SourceDraft } from "../store/fts.ts";
 import { buildUnits } from "../index/units.ts";
 import { renderState } from "../compaction/render.ts";
 import { pickRecall } from "../compaction/recall.ts";
@@ -477,10 +477,13 @@ async function postReplace(ev: CanonicalHookEvent, row: AdapterRow, project: Pro
   // query), the common web-search servers an objective and a query list. Those keys are read too, so an
   // MCP call never indexes under an empty query and the handle line's first query is the call's own words
   // (before: every MCP replace printed queries:["",...] and ranked on the prompt alone).
-  const intent = [tool.input.description, tool.input.command, tool.input.file_path, tool.input.pattern, tool.input.url,
+  // D-NO-LOSSY-CUT-2: the intent is echoed in the handle line, so a key over ECHO_MAX_BYTES (a multi-KB
+  // MCP prompt is routine) is cut to that many bytes, whole code points — the replace must never return a
+  // pointer the size of the output it replaced. The head keeps the query useful; ranking reads the same cut.
+  const intent = headBytes([tool.input.description, tool.input.command, tool.input.file_path, tool.input.pattern, tool.input.url,
     tool.input.intent, tool.input.objective, tool.input.query, tool.input.path, tool.input.prompt,
     listStr(tool.input.search_queries) || listStr(tool.input.queries)]
-    .map(str).find((v) => v.trim() !== "") ?? "";
+    .map(str).find((v) => v.trim() !== "") ?? "", ECHO_MAX_BYTES);
   // One chunk pass for both forms (D-M7-FT-2): the stored chunks and the selected chunks are the same
   // array, so the in-memory selection equals selectChunks over the stored source without reading it back.
   const chunks = chunkText(text, "text", REPLACE_CHUNK_BYTES); // D-M7-SV-1: small chunks, line-aligned cuts
