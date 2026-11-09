@@ -5,6 +5,16 @@
   },
   "description": "Context window saver for 10 coding agents. Local and free: sandboxed code execution, FTS5 search, session continuity.",
   "hooks": "./hooks/claude-code.json",
+  "mcpServers": {
+    "context-mode": {
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/server.mjs",
+        "--agent",
+        "claude-code"
+      ],
+      "command": "node"
+    }
+  },
   "name": "context-mode",
   "version": "2.2.2"
 }

@@ -29482,6 +29482,8 @@ function DAEMON_ADD_COMMAND(url4) {
 var DAEMON_UNIT_NAME = "context-mode-daemon.service";
 var DAEMON_UNIT_DIR = ["systemd", "user"];
 var DAEMON_PROBE_TIMEOUT_MS = 1500;
+var DISCOVER_METHOD = "server/discover";
+var CLIENT_CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities";
 var NODE_MIN = "24.15.0";
 var DATA_ROOT = "~/.context-mode";
 var DATA_DIR_ENV = "CONTEXT_MODE_DATA_DIR";
@@ -59742,6 +59744,20 @@ function sessionHeaderOf(req) {
 function isAbsoluteWorkspacePath(raw) {
   return raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith("\\\\");
 }
+function discoverSteer(body) {
+  let msg;
+  try {
+    msg = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (msg === null || typeof msg !== "object" || Array.isArray(msg)) return null;
+  const m = msg;
+  if (m.method !== DISCOVER_METHOD || typeof m.id !== "string" && typeof m.id !== "number") return null;
+  const caps = m.params?._meta?.[CLIENT_CAPABILITIES_META];
+  if (caps === null || typeof caps !== "object" || Array.isArray(caps)) return null;
+  return caps.roots === void 0 ? null : { id: m.id };
+}
 function daemonRouting(argv, env, core) {
   const pinnedProject = env.CLAUDE_PROJECT_DIR;
   const scrubbed = { ...env, CLAUDE_PROJECT_DIR: void 0 };
@@ -59984,6 +60000,14 @@ async function startDaemon(argv, env, onStopped) {
     res.once("close", () => abort.abort());
     const body = await readBody2(req, res);
     if (body === null) return;
+    if (req.method === "POST") {
+      const steer = discoverSteer(Buffer.from(body.buffer, body.byteOffset, body.byteLength).toString("utf8"));
+      if (steer !== null) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: steer.id, error: { code: -32601, message: "Method not found" } }));
+        return;
+      }
+    }
     const request2 = toWebRequest(req, port, body, abort.signal);
     const response = await isLegacyRequest(request2) ? await legacyHandle(request2) : await modern.fetch(request2);
     await sendResponse(res, response);
@@ -60086,6 +60110,7 @@ export {
   DAEMON_HELP,
   daemonRouting,
   daemonUnitText,
+  discoverSteer,
   isAbsoluteWorkspacePath,
   parseDaemonArgs,
   runDaemonUnitAction,
