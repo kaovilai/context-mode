@@ -11360,6 +11360,16 @@ var PLAIN_OUTPUT_ENV = Object.freeze({ NO_COLOR: "1", FORCE_COLOR: "0" });
 var RUN_LABEL_PREFIX = "run.mjs:";
 var RUN_SESSION_PREFIX = "mcp:";
 var HOST_SESSION_ENV = Object.freeze({ "claude-code": "CLAUDE_CODE_SESSION_ID" });
+var DAEMON_HOST = "127.0.0.1";
+var DAEMON_DEFAULT_PORT = 8790;
+var DAEMON_PORT_ENV = "CONTEXT_MODE_DAEMON_PORT";
+var DAEMON_PATH = "/mcp";
+var DAEMON_HEALTH_PATH = "/healthz";
+var DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}`;
+function daemonUrlOf(port) {
+  return `http://${DAEMON_HOST}:${port}${DAEMON_PATH}`;
+}
+var DAEMON_PROBE_TIMEOUT_MS = 1500;
 var NODE_MIN = "24.15.0";
 var DATA_ROOT = "~/.context-mode";
 var DATA_DIR_ENV = "CONTEXT_MODE_DATA_DIR";
@@ -11601,7 +11611,7 @@ var DECISION_ANSWERS_KEY = "answers";
 var DECISION_OPTION_KEY = "option";
 var DECISION_LABEL_JOIN = " | ";
 var RELEASE_REPO_URL = "https://github.com/mksglu/context-mode.git";
-var BUNDLE_SHA = true ? "f75e51d580374d518a8ceefc1422a009ffe67311" : void 0;
+var BUNDLE_SHA = typeof __CTX_BUNDLE_SHA__ === "string" ? __CTX_BUNDLE_SHA__ : void 0;
 var DOCTOR_CHECK_ORDER = Object.freeze(["D1", "D2", "D3", "D4", "D5", "D5b", "D6", "D7", "D8", "D9", "D10", "D11"]);
 var DOCTOR_LABEL = Object.freeze({
   D1: "version",
@@ -11617,6 +11627,11 @@ var DOCTOR_LABEL = Object.freeze({
   D10: "enforcement mode",
   D11: "shell"
 });
+var DAEMON_CHECK_LABEL = "daemon";
+var DAEMON_CHECK_FIX = "context-mode daemon --install";
+var DAEMON_CHECK_PASS_DETAIL = "shared daemon reachable";
+var DAEMON_CHECK_SELF_DETAIL = "this process is the shared daemon";
+var DAEMON_CHECK_DOWN_DETAIL = "no daemon answers on the configured port";
 var HOOK_FIXTURE_DIR = "fixtures";
 var HOOK_FIXTURE_FILE = "hook-roundtrip.json";
 var HOOK_ENTRY_FILE = "hook.mjs";
@@ -11735,7 +11750,6 @@ var D8_ORPHAN_HEALED_FIX = "run ctx_doctor again; D8 then reads PASS";
 function D8_ORPHAN_MOVE_FAILED(detail, cause) {
   return `${detail}; moving them aside failed: ${cause}`;
 }
-var DOCTOR_TOOL_NAME = "ctx_doctor";
 function JOURNAL_SKIPPED_LINE(cause) {
   return `Journal row for this call skipped: ${cause}`;
 }
@@ -24682,6 +24696,28 @@ async function checkIndex(project) {
 // src/core/ops/doctor-env.ts
 import { existsSync as existsSync10, readFileSync as readFileSync10, realpathSync as realpathSync6 } from "node:fs";
 import { isAbsolute as isAbsolute3, join as join14, relative as relative4 } from "node:path";
+
+// src/core/ops/daemon-state.ts
+var selfPort;
+function daemonSelfPort() {
+  return selfPort;
+}
+function daemonConfiguredPort(env) {
+  const raw = env[DAEMON_PORT_ENV];
+  if (raw !== void 0 && /^[0-9]+$/.test(raw)) {
+    const port = Number(raw);
+    if (port >= 1 && port <= 65535) return port;
+  }
+  return DAEMON_DEFAULT_PORT;
+}
+function daemonCheckWanted(env) {
+  const raw = env[DAEMON_PORT_ENV];
+  if (raw === void 0 || !/^[0-9]+$/.test(raw)) return false;
+  const port = Number(raw);
+  return port >= 1 && port <= 65535;
+}
+
+// src/core/ops/doctor-env.ts
 function pass3(id, detail = DOCTOR_PASS_DETAIL) {
   return { id, label: DOCTOR_LABEL[id], status: "PASS", detail };
 }
@@ -24861,6 +24897,20 @@ function checkShell(env) {
   const shell = findRuntime("shell", env);
   if (shell !== null) return pass3("D11", D11_PASS_DETAIL(shell, win));
   return win ? fail4("D11", D11_WIN_DETAIL, D11_WIN_FIX) : fail4("D11", D11_POSIX_DETAIL, D11_POSIX_FIX);
+}
+async function checkDaemon(env) {
+  const self = daemonSelfPort();
+  if (self === void 0 && !daemonCheckWanted(env)) return void 0;
+  const port = self ?? daemonConfiguredPort(env);
+  const row5 = (status, detail, fixCommand) => fixCommand === void 0 ? { id: "D12", label: DAEMON_CHECK_LABEL, status, detail } : { id: "D12", label: DAEMON_CHECK_LABEL, status, detail, fixCommand };
+  try {
+    const r = await fetch(`http://${DAEMON_HOST}:${port}${DAEMON_HEALTH_PATH}`, { signal: AbortSignal.timeout(DAEMON_PROBE_TIMEOUT_MS), redirect: "manual" });
+    const prefix = self === void 0 ? "" : DAEMON_CHECK_SELF_DETAIL + "; ";
+    if (r.status === 204) return row5("PASS", `${prefix}${DAEMON_CHECK_PASS_DETAIL} at ${daemonUrlOf(port)}`);
+    return row5("FAIL", `${daemonUrlOf(port)} answered HTTP ${r.status}, not the daemon's 204`, DAEMON_CHECK_FIX);
+  } catch {
+    return row5("FAIL", `${DAEMON_CHECK_DOWN_DETAIL} ${daemonUrlOf(port)}`, DAEMON_CHECK_FIX);
+  }
 }
 
 // src/core/ops/doctor-hook.ts
@@ -27618,6 +27668,13 @@ async function runDoctorChecks(ctx, adapter, host0) {
   };
   const rows = [];
   for (const id of DOCTOR_CHECK_ORDER) rows.push(await guard(id, checks[id]));
+  let daemonRow;
+  try {
+    daemonRow = await checkDaemon(env);
+  } catch (err) {
+    daemonRow = { id: "D12", label: DAEMON_CHECK_LABEL, status: "UNKNOWN", detail: lineOf2(err) };
+  }
+  if (daemonRow !== void 0) rows.push(daemonRow);
   const at2 = DOCTOR_CHECK_ORDER.indexOf("D8");
   if (orphan.length > 0) {
     const files = orphan;
@@ -33097,10 +33154,7 @@ function checkCall(tool, input) {
 }
 
 // src/entries/server.ts
-import { randomUUID } from "node:crypto";
-import { existsSync as existsSync22, realpathSync as realpathSync12, rmSync as rmSync9 } from "node:fs";
-import { dirname as dirname13, join as join25 } from "node:path";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create = Object.create;
@@ -60641,9 +60695,6 @@ function unwrapOptionalSchema(schema) {
   return schema.def?.innerType ?? schema;
 }
 
-// node_modules/@modelcontextprotocol/server/dist/index.mjs
-var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
-
 // node_modules/@modelcontextprotocol/server/dist/stdio.mjs
 var swallowsErrorsAfterClose = Symbol("swallowsErrorsAfterClose");
 var StdioServerTransport = class {
@@ -61163,6 +61214,27 @@ function installExitGuard(opts) {
   });
 }
 
+// src/entries/is-entry.ts
+import { realpathSync as realpathSync11 } from "node:fs";
+function isEntry(main, argv1, self) {
+  if (main !== void 0) return main;
+  if (argv1 === void 0 || argv1 === "") return false;
+  try {
+    return realpathSync11(argv1) === realpathSync11(self);
+  } catch {
+    return false;
+  }
+}
+
+// src/entries/server-core.ts
+import { randomUUID } from "node:crypto";
+import { existsSync as existsSync22, realpathSync as realpathSync12, rmSync as rmSync9 } from "node:fs";
+import { dirname as dirname13, join as join25 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+
+// node_modules/@modelcontextprotocol/server/dist/index.mjs
+var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
+
 // src/core/store/cleanup.ts
 import { existsSync as existsSync21, readdirSync as readdirSync9, rmSync as rmSync8 } from "node:fs";
 import { join as join24 } from "node:path";
@@ -61253,19 +61325,7 @@ function sweepDeadProjects(configDir) {
   return deleted;
 }
 
-// src/entries/is-entry.ts
-import { realpathSync as realpathSync11 } from "node:fs";
-function isEntry(main, argv1, self) {
-  if (main !== void 0) return main;
-  if (argv1 === void 0 || argv1 === "") return false;
-  try {
-    return realpathSync11(argv1) === realpathSync11(self);
-  } catch {
-    return false;
-  }
-}
-
-// src/entries/server.ts
+// src/entries/server-core.ts
 function resolveAgent(argv, env) {
   let afterFlag = false;
   for (const arg of argv) {
@@ -61312,13 +61372,13 @@ function metaNumber(meta3, key) {
   const v = meta3?.[key];
   return typeof v === "number" && Number.isSafeInteger(v) ? v : void 0;
 }
-function sessionIdOf(meta3, agent, env, serverId) {
+function sessionIdOf(meta3, agent, env, fallbackId) {
   const fromMeta = metaString(meta3, "sessionId");
   if (fromMeta !== void 0) return fromMeta;
   const key = agent === void 0 ? void 0 : HOST_SESSION_ENV[agent];
   const fromHost = key === void 0 ? void 0 : env[key];
   if (typeof fromHost === "string" && fromHost !== "") return fromHost;
-  return RUN_SESSION_PREFIX + serverId;
+  return fallbackId;
 }
 var CODEX_SANDBOX_STATE_META = "codex/sandbox-state-meta";
 var FILE_URL_PREFIX = "file:";
@@ -61368,26 +61428,44 @@ function errorReply(err) {
   console.error(err);
   return { text: INTERNAL_ERROR_LINE, isError: true, sandboxBytes: 0 };
 }
-async function startServer(argv, env) {
+function stdioRouting(argv, env, serverId) {
+  return {
+    agentOf: (_server, _meta) => resolveAgent(argv, env),
+    cwdOf: async (meta3, _req, server, agent) => {
+      const fromRoots = agent === "vscode" && !hasWorkspaceFolder(argv) ? await workspaceFromRoots(server) : void 0;
+      const callArgv = fromRoots === void 0 ? argv : [...argv, WORKSPACE_FOLDER_FLAG, fromRoots];
+      return { cwd: workspaceCwdOf(meta3, process.cwd(), process.argv[1]), argv: callArgv };
+    },
+    envOf: () => env,
+    fallbackIdOf: () => RUN_SESSION_PREFIX + serverId
+    // process-local id (§4 step 5, 00 A8)
+  };
+}
+async function createServerCore(argv, env) {
   const serverId = randomUUID();
   const degraded = await isDegraded();
   const tools = degraded ? TOOLS2.filter((t) => t.name === "ctx_doctor") : TOOLS2;
   const pending = /* @__PURE__ */ new Map();
   const held = [];
-  let cleaned = false;
+  const cleaned = /* @__PURE__ */ new Set();
+  let swept = false;
   async function openOwn(project) {
     const db = await openDb(project);
     const configDir = resolveConfigDir(process.env);
     try {
-      if (!cleaned) cleanupProject(db, configDir);
+      const dbPath = project.projectKey;
+      if (!cleaned.has(dbPath)) {
+        cleaned.add(dbPath);
+        cleanupProject(db, configDir);
+      }
       writeOwnerPid(configDir, project.projectKey, serverId);
     } catch (err) {
       closeDb(db);
       throw err;
     }
     held.push(db);
-    if (!cleaned) {
-      cleaned = true;
+    if (!swept) {
+      swept = true;
       sweepDeadProjects(configDir);
     }
     return db;
@@ -61414,62 +61492,89 @@ async function startServer(argv, env) {
     const db = await ownDb(project);
     appendEvent(db, ownCallRow(project, ctx, name, reply4));
   }
-  function dispatch2(server, tool) {
+  let activeCalls = 0;
+  let idleWaiters = [];
+  const callStarted = () => {
+    activeCalls++;
+  };
+  const callEnded = () => {
+    activeCalls--;
+    if (activeCalls === 0) {
+      const wake = idleWaiters;
+      idleWaiters = [];
+      for (const w of wake) w();
+    }
+  };
+  const inFlight = () => activeCalls;
+  const drain = async () => {
+    if (activeCalls === 0) return;
+    await new Promise((resolve10) => {
+      idleWaiters.push(resolve10);
+    });
+  };
+  function dispatch2(server, tool, routing) {
     return async (input, req) => {
-      const meta3 = req.mcpReq._meta;
-      const agent = resolveAgent(argv, env);
-      const fromRoots = agent === "vscode" && !hasWorkspaceFolder(argv) ? await workspaceFromRoots(server) : void 0;
-      const callArgv = fromRoots === void 0 ? argv : [...argv, WORKSPACE_FOLDER_FLAG, fromRoots];
-      let project;
-      const projectOf = () => {
-        if (agent === void 0) throw new CtxError("NO_PROJECT", { kind: "--agent" });
-        project ??= resolveProject(agent, { env, argv: callArgv, cwd: workspaceCwdOf(meta3, process.cwd(), process.argv[1]), piCwd: void 0 });
-        return project;
-      };
-      const ctx = {
-        get project() {
-          return projectOf();
-        },
-        sessionId: sessionIdOf(meta3, agent, env, serverId),
-        turn: metaNumber(meta3, "turn") ?? 0,
-        signal: req.mcpReq.signal,
-        clientInfo: server.server.getClientVersion(),
-        protocolVersion: server.server.getNegotiatedProtocolVersion() ?? ""
-      };
-      let reply4;
-      const checked = checkCall(tool, input);
-      if (!checked.ok) {
-        reply4 = { text: checked.line, isError: true, sandboxBytes: 0 };
-      } else {
-        try {
-          reply4 = await tool.handler(checked.data, ctx);
-        } catch (err) {
-          reply4 = errorReply(err);
-        }
+      callStarted();
+      try {
+        return await dispatchInner(server, tool, routing, input, req);
+      } finally {
+        callEnded();
       }
-      if (stopRequested()) {
-        setTimeout(stopSelf, UPGRADE_STOP_DELAY_MS);
-        return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
-      }
-      if (!degraded) {
-        let resolved;
-        try {
-          resolved = projectOf();
-        } catch (err) {
-          console.error("context-mode: no journal row: " + (err instanceof Error ? err.message : String(err)));
-        }
-        if (resolved !== void 0) {
-          try {
-            await journal(resolved, ctx, tool.name, reply4);
-          } catch (err) {
-            reply4 = tool.name === DOCTOR_TOOL_NAME ? { ...reply4, text: reply4.text + "\n" + JOURNAL_SKIPPED_LINE(errorReply(err).text) } : errorReply(err);
-          }
-        }
-      }
-      return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
     };
   }
-  function createServer() {
+  async function dispatchInner(server, tool, routing, input, req) {
+    const meta3 = req.mcpReq._meta;
+    const agent = routing.agentOf(server, meta3, req);
+    const { cwd, argv: callArgv } = await routing.cwdOf(meta3, req, server, agent);
+    let project;
+    const projectOf = () => {
+      if (agent === void 0) throw new CtxError("NO_PROJECT", { kind: "--agent" });
+      project ??= resolveProject(agent, { env: routing.envOf(), argv: callArgv, cwd, piCwd: void 0 });
+      return project;
+    };
+    const ctx = {
+      get project() {
+        return projectOf();
+      },
+      sessionId: sessionIdOf(meta3, agent, routing.envOf(), routing.fallbackIdOf(req)),
+      turn: metaNumber(meta3, "turn") ?? 0,
+      signal: req.mcpReq.signal,
+      clientInfo: server.server.getClientVersion(),
+      protocolVersion: server.server.getNegotiatedProtocolVersion() ?? ""
+    };
+    let reply4;
+    const checked = checkCall(tool, input);
+    if (!checked.ok) {
+      reply4 = { text: checked.line, isError: true, sandboxBytes: 0 };
+    } else {
+      try {
+        reply4 = await tool.handler(checked.data, ctx);
+      } catch (err) {
+        reply4 = errorReply(err);
+      }
+    }
+    if (stopRequested()) {
+      setTimeout(stopSelf, UPGRADE_STOP_DELAY_MS);
+      return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
+    }
+    if (!degraded) {
+      let resolved;
+      try {
+        resolved = projectOf();
+      } catch (err) {
+        console.error("context-mode: no journal row: " + (err instanceof Error ? err.message : String(err)));
+      }
+      if (resolved !== void 0) {
+        try {
+          await journal(resolved, ctx, tool.name, reply4);
+        } catch (err) {
+          reply4 = tool.name === "ctx_doctor" ? { ...reply4, text: reply4.text + "\n" + JOURNAL_SKIPPED_LINE(errorReply(err).text) } : errorReply(err);
+        }
+      }
+    }
+    return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
+  }
+  function createMcpServer(routing) {
     const server = new McpServer(
       { name: SERVER_KEY, version: "dev" },
       // DEVIATIONS: no version constant in contracts yet
@@ -61492,12 +61597,11 @@ async function startServer(argv, env) {
           ...tool.readOnly ? { annotations: { readOnlyHint: true } } : {},
           ...tool.alwaysLoad ? { _meta: { "anthropic/alwaysLoad": true } } : {}
         },
-        dispatch2(server, tool)
+        dispatch2(server, tool, routing)
       );
     }
     return server;
   }
-  let handle;
   function shutdown() {
     for (const db of held) {
       try {
@@ -61509,17 +61613,24 @@ async function startServer(argv, env) {
       }
       closeDb(db);
     }
-    handle?.close().catch((err) => console.error(err));
   }
   function stopSelf() {
     shutdown();
     process.kill(process.pid, "SIGTERM");
   }
-  installExitGuard({ onShutdown: shutdown, isTTY: process.stdin.isTTY === true });
-  handle = serveStdio(createServer);
+  return { serverId, degraded, drain, inFlight, shutdown, stopSelf, createMcpServer };
+}
+
+// src/entries/server.ts
+async function startServer(argv, env) {
+  const core = await createServerCore(argv, env);
+  const routing = stdioRouting(argv, env, core.serverId);
+  let handle;
+  installExitGuard({ onShutdown: core.shutdown, isTTY: process.stdin.isTTY === true });
+  handle = serveStdio(() => core.createMcpServer(routing));
   await new Promise((resolve10) => process.once("exit", () => resolve10()));
 }
-if (isEntry(import.meta.main, process.argv[1], fileURLToPath3(import.meta.url))) {
+if (isEntry(import.meta.main, process.argv[1], fileURLToPath4(import.meta.url))) {
   const [, , ...cliArgs] = process.argv;
   await startServer(cliArgs, process.env);
 }
