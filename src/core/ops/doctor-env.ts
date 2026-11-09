@@ -31,7 +31,7 @@ function unknown(id: OrderCheckId, detail: string, fixCommand?: string): DoctorR
 function fail(id: OrderCheckId, detail: string, fixCommand: string): DoctorRow {
   return { id, label: DOCTOR_LABEL[id], status: "FAIL", detail, fixCommand };
 }
-function warn(id: DoctorCheckId, detail: string, fixCommand: string): DoctorRow {
+function warn(id: OrderCheckId, detail: string, fixCommand: string): DoctorRow {
   return { id, label: DOCTOR_LABEL[id], status: "WARN", detail, fixCommand };
 }
 
