@@ -531,7 +531,14 @@ describe("A26 review round 1", { concurrency: false }, () => {
     mkdirSync(repoA, { recursive: true });
     mkdirSync(repoB, { recursive: true });
     writeFileSync(join(repoA, "roots-marker.log"), "2026-11-08 ERROR a26r14 quota exceeded\n");
-    // the Claude Code shape: no workspace header, roots declared and answered per roots/list
+    // the Claude Code shape: a modern discover probe first — it MUST be steered to -32601 (the
+    // change under test), because the SDK client below would otherwise connect sessionful on its
+    // own and the isolation could pass without the steer
+    const steered = await discoverProbe(url, { roots: { listChanged: true } });
+    assert.equal(steered.status, 200);
+    const steerMsg = await steered.json();
+    assert.equal(steerMsg.error?.code, -32601, "the roots-capable discover probe must be steered off the 2026-07-28 era: " + JSON.stringify(steerMsg));
+    // then no workspace header, roots declared and answered per roots/list
     const connect = async (workspace) => {
       const client = new Client({ name: "claude-code", version: "2.1.317" }, { capabilities: { roots: { listChanged: true } } });
       client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots: [{ uri: pathToFileURL(workspace).href, name: "repo" }] }));
