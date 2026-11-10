@@ -342,7 +342,10 @@ describe("ADR-0007: CLAUDE_CONFIG_DIR is honoured for detection", { concurrency:
     assert.equal(row.hookFiles[0].file, path.join(WIN_CFG, "settings.json"));
     assert.equal(row.copy.file, path.join(WIN_CFG, "plugins", "installed_plugins.json"));
     assert.ok(row.allowedWrites.includes(path.resolve(path.join(WIN_CFG, "settings.json"))), "the drop target is an allowed write");
-    assert.ok(!row.allowedWrites.some((f) => f.includes(".claude")), "nothing is written under <home>/.claude");
+    // 2.2.6: the user-config edit (the claude mcp add entry removal) follows CLAUDE_CONFIG_DIR too —
+    // Claude Code keeps .claude.json inside the config dir when the variable is set (verified on 2.1.322).
+    assert.ok(row.allowedWrites.includes(path.resolve(path.join(WIN_CFG, ".claude.json"))), "the user-config edit target follows CLAUDE_CONFIG_DIR");
+    assert.ok(!row.allowedWrites.some((f) => f.includes(path.join(WIN_HOME, ".claude"))), "nothing is written under <home>/.claude");
   });
 
   test("registry: claude-code without CLAUDE_CONFIG_DIR keeps <home>/.claude", () => {

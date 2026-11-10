@@ -7,7 +7,7 @@ import path from "node:path";
 import { ADAPTERS, getAdapter } from "../adapters/table.ts";
 import { AGENT_HOME_DIR, PLUGIN_MARKETPLACE_NAME, HOST_NODE_COMMAND, HOST_PLUGINS_DIR_NAME, INSTALLED_PLUGINS_FILE, MCP_ENV_FIELD, OPENCODE_BASE_CONFIG_FILE, OWN_MCP_ENTRY, SERVER_KEY, SETUP_BACKUP_DIR_NAME, TOOL_ORDER } from "../core/contracts/constants.ts";
 import type { AgentId, AdapterRow, HostConfigFormat } from "../core/contracts/types.ts";
-import { claudeDirOf, claudeProfileEnv, copilotDirOf, geminiDirOf, kiroDirOf, opencodeDirOf, ownMcpFileOf } from "../core/project/config-dir.ts";
+import { claudeDirOf, claudeProfileEnv, claudeUserConfigOf, copilotDirOf, geminiDirOf, kiroDirOf, opencodeDirOf, ownMcpFileOf } from "../core/project/config-dir.ts";
 import { ownMcpValue } from "../core/ops/host-config.ts";
 import { HOOK_SHAPES, type JsonObject } from "./hook-shapes.ts";
 
@@ -328,6 +328,9 @@ export function buildRegistry(ctx: SetupContext): CheckRow[] {
     const skillInstall = skillInstallFor(ctx, row);
     const copilotSettings = id === "copilot-cli" ? agentPath(ctx, id, [COPILOT_DIR, "settings.json"]) : undefined;
     const writes = [
+      // 2.2.6: setup removes the user-scope `claude mcp add` entry from Claude Code's user config (it
+      // suppresses the plugin's own MCP entry; see engine.ts planClaudeUserEntry). Only the marketplace row.
+      ...(id === "claude-code" && row.installMode === "marketplace" ? [claudeUserConfigOf(ctx.env, ctx.home)] : []),
       ...(copilotSettings ? [copilotSettings] : []),
       ...(config ? [config.file] : []), ...hookFiles.map((h) => h.file),
       ...(hookInstall.kind === "package" ? [] : [hookInstall.file]),

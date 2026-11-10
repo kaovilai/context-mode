@@ -288,12 +288,13 @@ default:
 context-mode daemon --install
 ```
 
-```sh
-claude mcp add --transport http context-mode http://127.0.0.1:8790/mcp
-```
-
-With the plugin installed this adds a SECOND registration next to its stdio server — remove one
-(`claude mcp remove context-mode`, or uninstall the plugin, which also removes its hooks and skills).
+The Claude Code plugin ships its own daemon entry (2.2.5): the plugin's MCP URL is the daemon's, and it
+sends the session header, so the plugin connects as soon as the daemon runs. The manual
+`claude mcp add` step still serves a Claude Code install that runs apart from the plugin: a manual entry
+with the daemon's URL makes Claude Code keep the manual entry and drop the plugin's (same-URL dedup,
+verified on 2.1.322), and the session header goes with it. A machine wired before 2.2.5 may still carry
+the manual entry; `claude mcp remove context-mode -s user` clears it, and contextmode setup clears it
+too. The ctx_doctor row D13 (claude-entry) names it.
 
 One process serves every session and every project; each session keeps its own session scope when
 its client names the session (see docs/daemon.md). Steps for other agents, per-project wiring, the

@@ -28,7 +28,7 @@ import type { ServerContext } from "@modelcontextprotocol/server";
 import { AGENT_IDS, type AgentId } from "../core/contracts/agents.ts";
 import { CLIENT_NAME_TO_PLATFORM, PLATFORM_TO_AGENT } from "../core/contracts/client-map.ts";
 import {
-  DAEMON_ADD_COMMAND, DAEMON_AGENT_HEADER, DAEMON_DEFAULT_PORT, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PATH, DAEMON_SESSION_HEADER,
+  DAEMON_ADD_COMMAND, DAEMON_ADD_CAVEAT, DAEMON_AGENT_HEADER, DAEMON_DEFAULT_PORT, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PATH, DAEMON_SESSION_HEADER,
   DAEMON_PORT_ENV, DAEMON_UNIT_DIR, DAEMON_UNIT_NAME, DAEMON_WORKSPACE_HEADER, DISCOVER_METHOD, CLIENT_CAPABILITIES_META, HOST_SESSION_ENV, WORKSPACE_FOLDER_FLAG,
 } from "../core/contracts/constants.ts";
 import { homeDirOf } from "../core/project/config-dir.ts";
@@ -120,11 +120,12 @@ export const DAEMON_HELP = `Usage: context-mode daemon [options]
 Run one shared MCP server for every agent session on this machine, over loopback
 Streamable HTTP (opt-in; the stdio spawn stays the default). Connect an agent with:
   claude mcp add --transport http context-mode http://127.0.0.1:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}
+(${DAEMON_ADD_CAVEAT}.)
 
 Options:
   --port <n>          Listen on this port (default ${DAEMON_DEFAULT_PORT}, or ${DAEMON_PORT_ENV})
   --agent <id>        The agent for sessions whose client name maps to no adapter (default: none)
-  --print-command     Print the claude mcp add line for this port; serve nothing
+  --print-command     Print the claude mcp add line (and the plugin caveat) for this port; serve nothing
   --print-unit        Print the systemd user unit; serve nothing
   --install           Write the systemd user unit, enable and start it; serve nothing
   --remove            Stop and remove the systemd user unit; serve nothing
@@ -567,6 +568,7 @@ async function main(): Promise<void> {
   const url = `http://${DAEMON_HOST}:${parsed.port}${DAEMON_PATH}`;
   if (parsed.printCommand === true) {
     process.stdout.write(DAEMON_ADD_COMMAND(url) + "\n");
+    process.stdout.write(DAEMON_ADD_CAVEAT + "\n");
     return;
   }
   if (parsed.printUnit === true) {
@@ -590,6 +592,7 @@ async function main(): Promise<void> {
   // channel here, so it is safe to write to.
   process.stdout.write(`context-mode daemon listening on ${handle.url}\n`);
   process.stdout.write(DAEMON_ADD_COMMAND(handle.url) + "\n");
+  process.stdout.write(DAEMON_ADD_CAVEAT + "\n");
   await stoppedOnce; // stop() settles this after its cleanup; the loop then drains to exit 0
 }
 

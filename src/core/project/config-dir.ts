@@ -3,7 +3,7 @@
 // D-CI-PERF-3: node:fs through getBuiltinModule; a static ESM import of node:fs also loads fs/promises, readline and streams.
 const { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync } = process.getBuiltinModule("node:fs") as typeof import("node:fs");
 import { basename, dirname, join, posix, resolve, win32 } from "node:path";
-import { AGENT_HOME_DIR, UPGRADE_HOST_COMMAND, APPDATA_ENV, CONFIG_TOML_FILE, SETUP_BACKUP_DIR_NAME, SETUP_MANIFEST_FILE, CLAUDE_CONFIG_DIR_ENV, CODEX_HOME_ENV, COPILOT_HOME_ENV, GEMINI_CLI_HOME_ENV, DATA_DIR_ENV, DATA_ROOT, HOST_PLUGINS_DIR_NAME, PLUGIN_CACHE_DIR_NAME, KIRO_HOME_ENV, OPENCODE_CONFIG_DIR_ENV, PI_AGENT_DIR, PI_AGENT_DIR_ENV, VSCODE_USER_DIR_SEGMENTS, XDG_CONFIG_HOME_ENV } from "../contracts/constants.ts";
+import { AGENT_HOME_DIR, UPGRADE_HOST_COMMAND, APPDATA_ENV, CONFIG_TOML_FILE, SETUP_BACKUP_DIR_NAME, SETUP_MANIFEST_FILE, CLAUDE_CONFIG_DIR_ENV, CLAUDE_USER_CONFIG_FILE, CODEX_HOME_ENV, COPILOT_HOME_ENV, GEMINI_CLI_HOME_ENV, DATA_DIR_ENV, DATA_ROOT, HOST_PLUGINS_DIR_NAME, PLUGIN_CACHE_DIR_NAME, KIRO_HOME_ENV, OPENCODE_CONFIG_DIR_ENV, PI_AGENT_DIR, PI_AGENT_DIR_ENV, VSCODE_USER_DIR_SEGMENTS, XDG_CONFIG_HOME_ENV } from "../contracts/constants.ts";
 import { CtxError } from "../contracts/errors.ts";
 
 /** The one home rule. An empty value counts as unset; null when nothing is set (D-M3-F-8).
@@ -131,6 +131,14 @@ function realOrSelf(path: string): string {
 export function claudeDirOf(env: NodeJS.ProcessEnv, home: string): string {
   const dir = env[CLAUDE_CONFIG_DIR_ENV];
   return dir !== undefined && dir !== "" ? dir : join(home, ...AGENT_HOME_DIR["claude-code"]);
+}
+
+/** 2.2.6: the file Claude Code keeps the user-scope MCP servers in (the `claude mcp add -s user` target),
+ * $CLAUDE_CONFIG_DIR/.claude.json when the variable is set (verified live on 2.1.322: a CLAUDE_CONFIG_DIR
+ * run writes .claude.json inside it), else <home>/.claude.json — one level above claudeDirOf's dir. */
+export function claudeUserConfigOf(env: NodeJS.ProcessEnv, home: string): string {
+  const dir = env[CLAUDE_CONFIG_DIR_ENV];
+  return join(dir !== undefined && dir !== "" ? dir : home, CLAUDE_USER_CONFIG_FILE);
 }
 
 /** #1338: the env words a copied Claude Code command needs to reach the profile in use: `CLAUDE_CONFIG_DIR='<dir>' ` when the

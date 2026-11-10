@@ -15,13 +15,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createServer, request } from "node:http";
-import { parseDaemonArgs, daemonUnitText, discoverSteer } from "../src/entries/daemon.ts";
+import { parseDaemonArgs, daemonUnitText, discoverSteer, DAEMON_HELP } from "../src/entries/daemon.ts";
 import { route } from "../src/entries/cli.ts";
 import { HELP_MAIN } from "../src/cli/args.ts";
 import { checkDaemon } from "../src/core/ops/doctor-env.ts";
 import { isAbsoluteWorkspacePath } from "../src/entries/daemon.ts";
 import { sessionIdOf } from "../src/entries/server-core.ts";
-import { DAEMON_ADD_COMMAND, DAEMON_CHECK_FIX, DAEMON_DEFAULT_PORT, DAEMON_PORT_ENV, DAEMON_SESSION_HEADER } from "../src/core/contracts/constants.ts";
+import { DAEMON_ADD_CAVEAT, DAEMON_ADD_COMMAND, DAEMON_CHECK_FIX, DAEMON_DEFAULT_PORT, DAEMON_PORT_ENV, DAEMON_SESSION_HEADER } from "../src/core/contracts/constants.ts";
 
 const REPO = join(import.meta.dirname, "..");
 
@@ -71,6 +71,19 @@ describe("ADR-0026 daemon flags and unit", { concurrency: CONC }, () => {
 
   test("the add command line is the one the daemon prints", () => {
     assert.equal(DAEMON_ADD_COMMAND("http://127.0.0.1:8790/mcp"), "claude mcp add --transport http context-mode http://127.0.0.1:8790/mcp");
+  });
+
+  // 2.2.6 D-CC-MCP-SUPPRESS-1: the add line alone taught the step that suppresses the plugin's MCP entry,
+  // so every surface that prints it (banner, --print-command, help) carries the caveat naming the removal.
+  test("the add command is always followed by the plugin caveat (D-CC-MCP-SUPPRESS-1)", () => {
+    assert.ok(DAEMON_ADD_CAVEAT.includes("claude mcp remove context-mode -s user"), DAEMON_ADD_CAVEAT);
+    assert.ok(DAEMON_ADD_CAVEAT.includes("drop the plugin"), DAEMON_ADD_CAVEAT);
+    assert.ok(DAEMON_HELP.includes(DAEMON_ADD_CAVEAT), "help carries the caveat");
+    const r = spawnSync(process.execPath, [join(REPO, "src", "entries", "daemon.ts"), "--print-command"], { encoding: "utf8", timeout: 30000 });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const lines = r.stdout.split("\n").filter((l) => l !== "");
+    assert.equal(lines[0], DAEMON_ADD_COMMAND(`http://127.0.0.1:${DAEMON_DEFAULT_PORT}/mcp`));
+    assert.equal(lines[1], DAEMON_ADD_CAVEAT);
   });
 });
 
@@ -158,6 +171,16 @@ describe("ADR-0026 one daemon, many sessions", () => {
     assert.ok(/http:\/\/127\.0\.0\.1:[0-9]+\/mcp$/.test(url), url);
     const health = await fetch(url.replace(/\/mcp$/, "/healthz"), { redirect: "manual" });
     assert.equal(health.status, 204);
+    // D-CC-MCP-SUPPRESS-1: the startup banner prints the caveat right after the connect line.
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 5000);
+      const check = () => {
+        if (banner.includes(DAEMON_ADD_CAVEAT)) { clearTimeout(timer); resolve(); return true; }
+        return false;
+      };
+      if (!check()) child.stdout.on("data", () => check());
+    });
+    assert.ok(banner.includes(DAEMON_ADD_CAVEAT), "banner: " + banner);
   });
 
   test("two sessions share one process: session B's project search finds session A's content", async () => {
