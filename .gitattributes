@@ -2,3 +2,5 @@
 # Prevents CRLF conversion on Windows (git core.autocrlf=true) from
 # showing unmodified files as changed after clone.
 * text=auto eol=lf
+
+.github/workflows/*.lock.yml linguist-generated=true

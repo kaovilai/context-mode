@@ -19,6 +19,7 @@ export const CLIENT_NAME_TO_PLATFORM: Record<string, PlatformId> = {
   "agy": "antigravity-cli",
   "cursor-vscode": "cursor",
   "Visual-Studio-Code": "vscode-copilot",
+  "Visual Studio Code": "vscode-copilot", // the name the vscode-mcp extension actually sends (tests/0007 fixture)
   "copilot-cli": "copilot-cli",
   "GitHub Copilot CLI": "copilot-cli",
   "github-copilot-cli": "copilot-cli",
@@ -48,3 +49,21 @@ export const CLIENT_NAME_TO_PLATFORM: Record<string, PlatformId> = {
   "kimi": "kimi",
   "Kimi Code": "kimi",
 };
+
+// ADR-0026: the shared daemon resolves the agent id per session from initialize clientInfo.name
+// (the stdio spawn keeps taking it from --agent, ADR-0007 decision 4). Only platforms with an
+// adapter row map to an AgentId; an unmapped name falls back to the daemon's own --agent.
+export const PLATFORM_TO_AGENT: Readonly<Partial<Record<PlatformId, import("./agents.ts").AgentId>>> = Object.freeze({
+  "claude-code": "claude-code",
+  "gemini-cli": "gemini",
+  "vscode-copilot": "vscode",
+  "copilot-cli": "copilot-cli",
+  "codex": "codex",
+  "qwen-code": "qwen",
+  "opencode": "opencode",
+  "kiro": "kiro",
+  // "pi" is deliberately NOT mapped: pi's project resolution needs piCwd (where the pi CLI keeps
+  // its per-session data), which a shared daemon cannot know per session; a pi client falls back
+  // to the daemon's own --agent instead of being routed to a broken project (A26-r4).
+});
+

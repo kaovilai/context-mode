@@ -28,7 +28,11 @@ const AGENTS = ["claude-code", "codex"]; // claude-shape decode; the same hook.m
 function budgetMs() {
   const m = readFileSync(ENGINE, "utf8").match(/export const OVERHEAD_P95_MS = (\d+);/);
   if (!m) throw new Error("setup-hook-overhead: src/setup/engine.ts has no OVERHEAD_P95_MS");
-  return Number(m[1]);
+  const base = Number(m[1]);
+  // The same CI-only knob src/setup/engine.ts already reads (overheadBudgetMs): shared runners add jitter
+  // the budget was not measured on. Unset or below the base keeps the base, so nothing changes by default.
+  const n = Number(process.env.CM_HOOK_OVERHEAD_BUDGET_MS);
+  return Number.isFinite(n) && n >= base ? n : base;
 }
 
 function p95(xs) {
