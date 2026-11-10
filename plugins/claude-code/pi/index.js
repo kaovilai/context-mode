@@ -11623,7 +11623,7 @@ var DECISION_ANSWERS_KEY = "answers";
 var DECISION_OPTION_KEY = "option";
 var DECISION_LABEL_JOIN = " | ";
 var RELEASE_REPO_URL = "https://github.com/mksglu/context-mode.git";
-var BUNDLE_SHA = true ? "22a9c5fa1d1fcd08f8f557dea9060f6c03f0d862" : void 0;
+var BUNDLE_SHA = true ? "ec223a30aa1b5ec1c92da6e80f36e13aad1ec35b" : void 0;
 var DOCTOR_CHECK_ORDER = Object.freeze(["D1", "D2", "D3", "D4", "D5", "D5b", "D6", "D7", "D8", "D9", "D10", "D11"]);
 var DOCTOR_LABEL = Object.freeze({
   D1: "version",
@@ -11644,6 +11644,9 @@ var DAEMON_CHECK_FIX = "context-mode daemon --install";
 var DAEMON_CHECK_PASS_DETAIL = "shared daemon reachable";
 var DAEMON_CHECK_SELF_DETAIL = "this process is the shared daemon";
 var DAEMON_CHECK_DOWN_DETAIL = "no daemon answers on the configured port";
+var CLAUDE_ENTRY_CHECK_LABEL = "claude-entry";
+var CLAUDE_ENTRY_CHECK_DETAIL = "user-scope claude-code MCP entry mcpServers.context-mode in ~/.claude.json duplicates the plugin's daemon URL, so Claude Code drops the plugin's MCP entry (and its session header)";
+var CLAUDE_ENTRY_CHECK_FIX = "claude mcp remove context-mode -s user";
 var HOOK_FIXTURE_DIR = "fixtures";
 var HOOK_FIXTURE_FILE = "hook-roundtrip.json";
 var HOOK_ENTRY_FILE = "hook.mjs";
@@ -14781,6 +14784,10 @@ function realOrSelf(path8) {
 function claudeDirOf(env, home) {
   const dir = env[CLAUDE_CONFIG_DIR_ENV];
   return dir !== void 0 && dir !== "" ? dir : join(home, ...AGENT_HOME_DIR["claude-code"]);
+}
+function claudeUserConfigOf(env, home) {
+  const dir = env[CLAUDE_CONFIG_DIR_ENV];
+  return join(dir !== void 0 && dir !== "" ? dir : home, CLAUDE_USER_CONFIG_FILE);
 }
 function claudeProfileEnv(env, platform = process.platform) {
   const dir = env[CLAUDE_CONFIG_DIR_ENV];
@@ -21496,7 +21503,7 @@ var ctxBatch = Object.freeze({
 });
 
 // src/core/tools/doctor.ts
-import { readdirSync as readdirSync7, readFileSync as readFileSync16, existsSync as existsSync16 } from "node:fs";
+import { readdirSync as readdirSync7, readFileSync as readFileSync17, existsSync as existsSync17 } from "node:fs";
 import { basename as basename5, join as join19 } from "node:path";
 
 // src/core/ops/bundle-dir.ts
@@ -24977,7 +24984,7 @@ async function checkIndex(project) {
 }
 
 // src/core/ops/doctor-env.ts
-import { existsSync as existsSync11, readFileSync as readFileSync12, realpathSync as realpathSync6 } from "node:fs";
+import { existsSync as existsSync12, readFileSync as readFileSync13, realpathSync as realpathSync6 } from "node:fs";
 import { isAbsolute as isAbsolute3, join as join15, relative as relative4 } from "node:path";
 
 // src/core/ops/daemon-state.ts
@@ -25000,6 +25007,25 @@ function daemonCheckWanted(env) {
   return port >= 1 && port <= 65535;
 }
 
+// src/core/ops/claude-entry.ts
+import { existsSync as existsSync11, readFileSync as readFileSync12 } from "node:fs";
+function claudeUserMcpEntry(env, home) {
+  const file2 = claudeUserConfigOf(env, home);
+  if (!existsSync11(file2)) return void 0;
+  let doc;
+  try {
+    doc = JSON.parse(readFileSync12(file2, "utf8"));
+  } catch {
+    return void 0;
+  }
+  const entry = typeof doc === "object" && doc !== null ? doc[MCP_SERVERS_KEY] : void 0;
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return void 0;
+  const own4 = entry[SERVER_KEY];
+  if (typeof own4 !== "object" || own4 === null || Array.isArray(own4)) return void 0;
+  const url4 = own4.url;
+  return { url: typeof url4 === "string" ? url4 : "" };
+}
+
 // src/core/ops/doctor-env.ts
 function pass3(id, detail = DOCTOR_PASS_DETAIL) {
   return { id, label: DOCTOR_LABEL[id], status: "PASS", detail };
@@ -25015,7 +25041,7 @@ function warn(id, detail, fixCommand) {
 }
 function bundleVersion(bundleDir2) {
   try {
-    const v = JSON.parse(readFileSync12(join15(bundleDir2, D1_PACKAGE_FILE), "utf8")).version;
+    const v = JSON.parse(readFileSync13(join15(bundleDir2, D1_PACKAGE_FILE), "utf8")).version;
     return typeof v === "string" && v !== "" ? v : void 0;
   } catch {
     return void 0;
@@ -25167,7 +25193,7 @@ function checkMcp(ctx, adapter) {
   return adapter?.installMode === "in-process" ? pass3("D6", D6_IN_PROCESS_DETAIL) : unknown3("D6", D6_UNKNOWN_DETAIL);
 }
 function piCwdInside(worktree, piCwd) {
-  if (piCwd === void 0 || !existsSync11(piCwd)) return false;
+  if (piCwd === void 0 || !existsSync12(piCwd)) return false;
   const rel = relative4(worktree, realpathSync6.native(piCwd));
   return rel === "" || !rel.startsWith("..") && !isAbsolute3(rel);
 }
@@ -25202,9 +25228,16 @@ async function checkDaemon(env) {
     return row5("FAIL", `${DAEMON_CHECK_DOWN_DETAIL} ${daemonUrlOf(port)}`, DAEMON_CHECK_FIX);
   }
 }
+function checkClaudeEntry(env, home) {
+  if (home === null) return void 0;
+  const entry = claudeUserMcpEntry(env, home);
+  if (entry === void 0) return void 0;
+  const url4 = entry.url === "" ? "" : ` (${entry.url})`;
+  return { id: "D13", label: CLAUDE_ENTRY_CHECK_LABEL, status: "WARN", detail: CLAUDE_ENTRY_CHECK_DETAIL + url4, fixCommand: CLAUDE_ENTRY_CHECK_FIX };
+}
 
 // src/core/ops/doctor-hook.ts
-import { existsSync as existsSync13, mkdirSync as mkdirSync4, mkdtempSync, readFileSync as readFileSync13, realpathSync as realpathSync8, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { existsSync as existsSync14, mkdirSync as mkdirSync4, mkdtempSync, readFileSync as readFileSync14, realpathSync as realpathSync8, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import path7 from "node:path";
 
@@ -27030,7 +27063,7 @@ function nodeLaunch(env, host = { bun: process.versions.bun, execPath: process.e
 
 // src/setup/codex-trust.ts
 import { createHash } from "node:crypto";
-import { existsSync as existsSync12, realpathSync as realpathSync7 } from "node:fs";
+import { existsSync as existsSync13, realpathSync as realpathSync7 } from "node:fs";
 import path6 from "node:path";
 import { spawn as spawn3, spawnSync as spawnSync2 } from "node:child_process";
 
@@ -27253,10 +27286,10 @@ function isObject6(v) {
 }
 function loadFixture(bundleDir2, agent) {
   const file2 = path7.join(bundleDir2, HOOK_FIXTURE_DIR, HOOK_FIXTURE_FILE);
-  if (!existsSync13(file2)) return { cause: D5_FIXTURE_FILE_ABSENT(file2) };
+  if (!existsSync14(file2)) return { cause: D5_FIXTURE_FILE_ABSENT(file2) };
   let all;
   try {
-    all = JSON.parse(hostText(readFileSync13(file2, "utf8")));
+    all = JSON.parse(hostText(readFileSync14(file2, "utf8")));
   } catch (err) {
     return { cause: D5_FIXTURE_PARSE(file2, err instanceof Error ? err.message : String(err)) };
   }
@@ -27470,7 +27503,7 @@ async function codexStopDetail(i, timeoutMs) {
       timeoutMs,
       stdin: JSON.stringify(codexStopPayload(i.worktree ?? home))
     });
-    const logged = existsSync13(path7.join(home, HOOK_ERROR_LOG_FILE));
+    const logged = existsSync14(path7.join(home, HOOK_ERROR_LOG_FILE));
     return !logged && isNativeShape(i.agent, r.stdout.toString("utf8"), r.exitCode, r.killed, "Stop") ? null : D5_STOP_DETAIL;
   } finally {
     rmSync2(home, { recursive: true, force: true });
@@ -27481,7 +27514,7 @@ async function checkHookRoundTrip(i) {
     const trust = await codexPluginTrust(i);
     if (trust !== null) return trust;
   }
-  if (i.agent === "codex" && existsSync13(path7.join(i.codexConfigDir, HOOKS_JSON_FILE)) && !codexHookJournaled(i.db)) {
+  if (i.agent === "codex" && existsSync14(path7.join(i.codexConfigDir, HOOKS_JSON_FILE)) && !codexHookJournaled(i.db)) {
     return row("UNKNOWN", D5_CODEX_UNTRUSTED_DETAIL);
   }
   const fixture = loadFixture(i.bundleDir, i.agent);
@@ -27523,11 +27556,11 @@ async function checkHookRoundTrip(i) {
 }
 
 // src/core/ops/db-heal.ts
-import { existsSync as existsSync14, mkdirSync as mkdirSync6, rmSync as rmSync4 } from "node:fs";
+import { existsSync as existsSync15, mkdirSync as mkdirSync6, rmSync as rmSync4 } from "node:fs";
 import { basename as basename4, dirname as dirname9, join as join17 } from "node:path";
 
 // src/core/store/owners.ts
-import { mkdirSync as mkdirSync5, readdirSync as readdirSync6, readFileSync as readFileSync14, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { mkdirSync as mkdirSync5, readdirSync as readdirSync6, readFileSync as readFileSync15, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "node:fs";
 import { basename as basename3, join as join16 } from "node:path";
 function ownersDir(configDir, projectKey) {
   return join16(configDir, PROJECTS_DIR_NAME, projectKey, OWNERS_DIR_NAME);
@@ -27571,7 +27604,7 @@ function listLiveOwners(configDir, projectKey) {
     const file2 = join16(dir, name);
     let text;
     try {
-      text = readFileSync14(file2, "utf8");
+      text = readFileSync15(file2, "utf8");
     } catch (err) {
       if (errCode2(err) === "ENOENT") continue;
       throw err;
@@ -27617,7 +27650,7 @@ function renameAside(dbPath) {
   const ts = String(Date.now());
   for (const suffix of DB_SIBLING_SUFFIXES) {
     const file2 = dbPath + suffix;
-    if (existsSync14(file2)) renameWithRetry(file2, file2 + HEAL_TS_SEP + ts + HEAL_BACKUP_SUFFIX);
+    if (existsSync15(file2)) renameWithRetry(file2, file2 + HEAL_TS_SEP + ts + HEAL_BACKUP_SUFFIX);
   }
   return ts;
 }
@@ -27755,7 +27788,7 @@ function unsupportedHostOf(sig) {
 
 // src/core/ops/doctor-issue.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
-import { closeSync as closeSync2, existsSync as existsSync15, fstatSync, mkdirSync as mkdirSync7, openSync as openSync2, readFileSync as readFileSync15, readSync as readSync2, realpathSync as realpathSync9, writeFileSync as writeFileSync4 } from "node:fs";
+import { closeSync as closeSync2, existsSync as existsSync16, fstatSync, mkdirSync as mkdirSync7, openSync as openSync2, readFileSync as readFileSync16, readSync as readSync2, realpathSync as realpathSync9, writeFileSync as writeFileSync4 } from "node:fs";
 import { delimiter, join as join18 } from "node:path";
 var TOKEN_PREFIXES = ["ghp_", "gho_", "github_pat_", "sk-", "xoxb-", "AKIA"];
 function tildeOf(env) {
@@ -27797,7 +27830,7 @@ function onPath(env, tool) {
   const out = [];
   for (const dir of (env.PATH ?? env.Path ?? "").split(delimiter)) {
     if (dir === "") continue;
-    for (const n of names) if (existsSync15(join18(dir, n))) {
+    for (const n of names) if (existsSync16(join18(dir, n))) {
       out.push(join18(dir, n));
       break;
     }
@@ -27806,7 +27839,7 @@ function onPath(env, tool) {
 }
 function hookLogTail(env) {
   const file2 = hookLogPath(env);
-  if (file2 === "" || !existsSync15(file2)) return [`(${file2 || "hook-errors.log"} holds zero lines)`];
+  if (file2 === "" || !existsSync16(file2)) return [`(${file2 || "hook-errors.log"} holds zero lines)`];
   try {
     const fd = openSync2(file2, "r");
     try {
@@ -27826,7 +27859,7 @@ function hookLogTail(env) {
 }
 async function journalRows(ctx) {
   const head2 = ["| kind | tool | bytes | ok | exit_code | created_at |", "|---|---|---|---|---|---|"];
-  if (!existsSync15(ctx.project.dbPath)) return [`(context.db is absent at ${ctx.project.dbPath})`];
+  if (!existsSync16(ctx.project.dbPath)) return [`(context.db is absent at ${ctx.project.dbPath})`];
   try {
     const db = await openDb(ctx.project, { readOnly: true });
     try {
@@ -27852,13 +27885,13 @@ function agentConfig(adapter, env, worktree) {
   for (const f of files) {
     if (seen.has(f.path)) continue;
     seen.add(f.path);
-    if (!existsSync15(f.path)) {
+    if (!existsSync16(f.path)) {
       out.push(`${f.label}: ${f.path} (absent)`);
       continue;
     }
     let text = "";
     try {
-      text = readFileSync15(f.path, "utf8");
+      text = readFileSync16(f.path, "utf8");
     } catch (err) {
       out.push(`${f.label}: ${f.path} (read: ${err instanceof Error ? err.message : String(err)})`);
       continue;
@@ -27958,7 +27991,7 @@ async function guard(id, run) {
   }
 }
 async function codexDb(ctx, adapter) {
-  if (adapter.id !== "codex" || !existsSync16(ctx.project.dbPath)) return null;
+  if (adapter.id !== "codex" || !existsSync17(ctx.project.dbPath)) return null;
   try {
     return await openDb(ctx.project, { readOnly: true });
   } catch {
@@ -27995,10 +28028,10 @@ async function hookRow(ctx, adapter, host) {
 }
 function ownServerId(configDir, projectKey) {
   const dir = join19(configDir, PROJECTS_DIR_NAME, projectKey, OWNERS_DIR_NAME);
-  if (!existsSync16(dir)) return "";
+  if (!existsSync17(dir)) return "";
   for (const name of readdirSync7(dir)) {
     if (!name.endsWith(OWNER_PID_EXT)) continue;
-    if (readFileSync16(join19(dir, name), "utf8").trim() === String(process.pid)) return basename5(name, OWNER_PID_EXT);
+    if (readFileSync17(join19(dir, name), "utf8").trim() === String(process.pid)) return basename5(name, OWNER_PID_EXT);
   }
   return "";
 }
@@ -28039,6 +28072,13 @@ async function runDoctorChecks(ctx, adapter, host0) {
     daemonRow = { id: "D12", label: DAEMON_CHECK_LABEL, status: "UNKNOWN", detail: lineOf2(err) };
   }
   if (daemonRow !== void 0) rows.push(daemonRow);
+  let claudeEntryRow;
+  try {
+    claudeEntryRow = checkClaudeEntry(env, homeDirOf(env));
+  } catch (err) {
+    claudeEntryRow = { id: "D13", label: CLAUDE_ENTRY_CHECK_LABEL, status: "UNKNOWN", detail: lineOf2(err) };
+  }
+  if (claudeEntryRow !== void 0) rows.push(claudeEntryRow);
   const at2 = DOCTOR_CHECK_ORDER.indexOf("D8");
   if (orphan.length > 0) {
     const files = orphan;
@@ -28103,7 +28143,7 @@ var ctxDoctor = Object.freeze({
 });
 
 // src/core/tools/execute.ts
-import { existsSync as existsSync17, mkdtempSync as mkdtempSync2, rmSync as rmSync5, writeFileSync as writeFileSync5 } from "node:fs";
+import { existsSync as existsSync18, mkdtempSync as mkdtempSync2, rmSync as rmSync5, writeFileSync as writeFileSync5 } from "node:fs";
 import { tmpdir as tmpdir3 } from "node:os";
 import { dirname as dirname11, join as join20, parse as parse3, resolve as resolve8 } from "node:path";
 
@@ -28188,7 +28228,7 @@ function schemaLine(issue4) {
 }
 function fileError(given, abs, root) {
   let dir = abs;
-  while (!existsSync17(dir) && dirname11(dir) !== dir) dir = dirname11(dir);
+  while (!existsSync18(dir) && dirname11(dir) !== dir) dir = dirname11(dir);
   if (isInside(root, dir)) return null;
   return new CtxError("OUTSIDE_ROOT", { p: given, root }).toLine();
 }
@@ -28306,11 +28346,11 @@ var ctxExecute = {
 };
 
 // src/core/tools/index.ts
-import { existsSync as existsSync18, readFileSync as readFileSync18, statSync as statSync8 } from "node:fs";
+import { existsSync as existsSync19, readFileSync as readFileSync19, statSync as statSync8 } from "node:fs";
 import { dirname as dirname12, extname as extname3, join as join22, relative as relative5, resolve as resolve9 } from "node:path";
 
 // src/core/index/walk.ts
-import { readdirSync as readdirSync8, readFileSync as readFileSync17, realpathSync as realpathSync10, statSync as statSync7 } from "node:fs";
+import { readdirSync as readdirSync8, readFileSync as readFileSync18, realpathSync as realpathSync10, statSync as statSync7 } from "node:fs";
 import { join as join21 } from "node:path";
 var GITIGNORE = ".gitignore";
 var GIT_DIR = ".git";
@@ -28372,7 +28412,7 @@ function compareFound(a, b) {
 function readRules(file2, base) {
   let body;
   try {
-    body = readFileSync17(file2, "utf8");
+    body = readFileSync18(file2, "utf8");
   } catch {
     return [];
   }
@@ -32500,14 +32540,14 @@ function kindOfType(contentType) {
 }
 function readUtf8(absPath) {
   try {
-    return utf8.decode(readFileSync18(absPath));
+    return utf8.decode(readFileSync19(absPath));
   } catch {
     return void 0;
   }
 }
 function missingOrOutside(given, abs, root) {
   let dir = abs;
-  while (!existsSync18(dir) && dirname12(dir) !== dir) dir = dirname12(dir);
+  while (!existsSync19(dir) && dirname12(dir) !== dir) dir = dirname12(dir);
   if (dir !== abs && isInside(root, dir)) return new CtxError("INVALID_ARGS", { field: "path", action: "pass an existing file or folder" });
   return new CtxError("OUTSIDE_ROOT", { p: given, root });
 }
@@ -33057,7 +33097,7 @@ var ctxStats = Object.freeze({
 });
 
 // src/core/ops/host-write.ts
-import { copyFileSync, existsSync as existsSync19, mkdirSync as mkdirSync8, writeFileSync as writeFileSync6 } from "node:fs";
+import { copyFileSync, existsSync as existsSync20, mkdirSync as mkdirSync8, writeFileSync as writeFileSync6 } from "node:fs";
 import { dirname as dirname13, join as join23 } from "node:path";
 function defaultWrite(file2, text) {
   writeFileSync6(file2, text, "utf8");
@@ -33089,7 +33129,7 @@ function toRow(file2, edit) {
 function writeWithRollback(file2, text, write2, atomic) {
   const trash = file2 + UPGRADE_TRASH_SUFFIX;
   const tmp = `${file2}${HOST_CONFIG_TMP_SUFFIX}.${process.pid}`;
-  const had = existsSync19(file2);
+  const had = existsSync20(file2);
   mkdirSync8(dirname13(file2), { recursive: true });
   if (had) copyFileSync(file2, trash);
   try {
@@ -33119,7 +33159,7 @@ function regenerateHostConfig(row5, home, opts = {}) {
   if (requested === null) return [];
   const current = readHostConfig(row5.id, requested);
   const result = mergeOwnEntries(row5.id, current.text, current.format, row5);
-  const exists = existsSync19(current.path);
+  const exists = existsSync20(current.path);
   if (exists && result.text === current.text) return [];
   const text = result.text === "" && current.format !== "toml" ? JSON.stringify({}) : result.text;
   writeWithRollback(current.path, current.layout === void 0 ? text : withLayout(text, current.layout), opts.write ?? defaultWrite, opts.atomic ?? {});
@@ -33127,7 +33167,7 @@ function regenerateHostConfig(row5, home, opts = {}) {
 }
 
 // src/core/ops/uninstall.ts
-import { existsSync as existsSync20, readdirSync as readdirSync9, rmSync as rmSync6, writeFileSync as writeFileSync7 } from "node:fs";
+import { existsSync as existsSync21, readdirSync as readdirSync9, rmSync as rmSync6, writeFileSync as writeFileSync7 } from "node:fs";
 import { join as join24 } from "node:path";
 function row2(area, before, after) {
   return { area, before, after };
@@ -33161,7 +33201,7 @@ function removeCache(adapter, env, configDir) {
     }
     case "plugin": {
       const agentDir = join24(configDir, DATA_PLUGINS_DIR_NAME, adapter.id);
-      if (!existsSync20(agentDir)) return row2(UPGRADE_CACHE_AREA, "", UPGRADE_NOT_FOUND);
+      if (!existsSync21(agentDir)) return row2(UPGRADE_CACHE_AREA, "", UPGRADE_NOT_FOUND);
       rmSync6(agentDir, { recursive: true, force: true });
       return row2(UPGRADE_CACHE_AREA, agentDir, UPGRADE_REMOVED);
     }
@@ -33241,7 +33281,7 @@ function removeOwnEntries(agent, env) {
 function removeProjectData(configDir, projectKey) {
   const projects = join24(configDir, PROJECTS_DIR_NAME);
   const dir = join24(projects, projectKey);
-  if (!existsSync20(dir)) return row2(UPGRADE_DATA_AREA, "", UPGRADE_NOT_FOUND);
+  if (!existsSync21(dir)) return row2(UPGRADE_DATA_AREA, "", UPGRADE_NOT_FOUND);
   if (dir === projects || !isInside(projects, dir)) throw new CtxError("OUTSIDE_ROOT", { p: dir, root: projects });
   for (const name of readdirSync9(dir)) {
     if (name !== OWNERS_DIR_NAME) rmSync6(join24(dir, name), { recursive: true, force: true });
@@ -33257,7 +33297,7 @@ function runUninstall(input) {
 }
 
 // src/core/ops/v1-remove.ts
-import { copyFileSync as copyFileSync2, existsSync as existsSync21, readFileSync as readFileSync19, rmSync as rmSync7 } from "node:fs";
+import { copyFileSync as copyFileSync2, existsSync as existsSync22, readFileSync as readFileSync20, rmSync as rmSync7 } from "node:fs";
 var isObj4 = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 var areaOf = (f) => f.path === "" ? f.file : f.file + UPGRADE_AREA_KEY_SEP + f.path;
 var row3 = (f, after) => ({ area: areaOf(f), before: f.reason, after });
@@ -33269,7 +33309,7 @@ function moveAside(target, undo) {
 }
 function keepAside(target, undo) {
   let aside = target + UPGRADE_ASIDE_SUFFIX;
-  for (let n = 2; existsSync21(aside); n += 1) aside = target + UPGRADE_ASIDE_SUFFIX + "-" + n;
+  for (let n = 2; existsSync22(aside); n += 1) aside = target + UPGRADE_ASIDE_SUFFIX + "-" + n;
   renameWithRetry(target, aside);
   undo.push({ trash: aside, target, keep: true });
   return aside;
@@ -33308,8 +33348,8 @@ function locate(doc, path8) {
   return null;
 }
 function stripJsonEntries(agent, file2, findings, kept, undo) {
-  const layout = hostLayout(readFileSync19(file2, "utf8"));
-  const text = hostText(readFileSync19(file2, "utf8"));
+  const layout = hostLayout(readFileSync20(file2, "utf8"));
+  const text = hostText(readFileSync20(file2, "utf8"));
   const doc = parseHostConfig(agent, file2, text, "jsonc");
   const hit = /* @__PURE__ */ new Set();
   const byContainer = /* @__PURE__ */ new Map();
@@ -33346,20 +33386,20 @@ function removeV1(agent, findings, project) {
     if (UPGRADE_REPORT_ONLY_REASONS.includes(f.reason)) done.set(f, UPGRADE_REPORT_ONLY);
     else if (f.path === "") {
       if (project !== void 0 && reachedThroughLink(project, f.file)) done.set(f, UPGRADE_REPORT_ONLY);
-      else if (existsSync21(f.file) && UPGRADE_KEEP_ASIDE_REASONS.includes(f.reason)) done.set(f, UPGRADE_MOVED_ASIDE + keepAside(f.file, undo));
-      else if (existsSync21(f.file)) {
+      else if (existsSync22(f.file) && UPGRADE_KEEP_ASIDE_REASONS.includes(f.reason)) done.set(f, UPGRADE_MOVED_ASIDE + keepAside(f.file, undo));
+      else if (existsSync22(f.file)) {
         moveAside(f.file, undo);
         done.set(f, UPGRADE_REMOVED);
       } else done.set(f, UPGRADE_NOT_FOUND);
     } else entries.set(f.file, [...entries.get(f.file) ?? [], f]);
   }
   for (const [file2, list4] of entries) {
-    if (!existsSync21(file2)) {
+    if (!existsSync22(file2)) {
       for (const f of list4) done.set(f, UPGRADE_NOT_FOUND);
       continue;
     }
     if (file2.endsWith(TOML_EXT)) {
-      const rawToml = readFileSync19(file2, "utf8");
+      const rawToml = readFileSync20(file2, "utf8");
       const tomlLayout = hostLayout(rawToml);
       let text = hostText(rawToml);
       for (const f of list4) {
@@ -33387,7 +33427,7 @@ function removeV1(agent, findings, project) {
     },
     rollback() {
       for (const u of undo.splice(0).reverse()) {
-        if (!existsSync21(u.trash)) continue;
+        if (!existsSync22(u.trash)) continue;
         rmSync7(u.target, { recursive: true, force: true });
         renameWithRetry(u.trash, u.target);
       }
@@ -61591,7 +61631,7 @@ function isEntry(main, argv1, self) {
 
 // src/entries/server-core.ts
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync23, realpathSync as realpathSync12, rmSync as rmSync9 } from "node:fs";
+import { existsSync as existsSync24, realpathSync as realpathSync12, rmSync as rmSync9 } from "node:fs";
 import { dirname as dirname14, join as join26 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
@@ -61599,7 +61639,7 @@ import { fileURLToPath as fileURLToPath3 } from "node:url";
 var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
 
 // src/core/store/cleanup.ts
-import { existsSync as existsSync22, readdirSync as readdirSync10, rmSync as rmSync8 } from "node:fs";
+import { existsSync as existsSync23, readdirSync as readdirSync10, rmSync as rmSync8 } from "node:fs";
 import { join as join25 } from "node:path";
 function deleteSource(raw, id) {
   raw.prepare("DELETE FROM sources WHERE id = ?").run(id);
@@ -61635,7 +61675,7 @@ function userVersion(raw) {
   return raw.prepare("PRAGMA user_version").get().user_version;
 }
 function openForSweep(dbPath, projectKey) {
-  if (!existsSync22(dbPath) && (existsSync22(dbPath + DB_WAL_SUFFIX) || existsSync22(dbPath + DB_SHM_SUFFIX))) {
+  if (!existsSync23(dbPath) && (existsSync23(dbPath + DB_WAL_SUFFIX) || existsSync23(dbPath + DB_SHM_SUFFIX))) {
     throw new CtxError("DB_GONE");
   }
   const sqlite = process.getBuiltinModule("node:sqlite");
@@ -61841,7 +61881,7 @@ async function createServerCore(argv, env) {
       opening.catch(() => pending.delete(project.dbPath));
     }
     const db = await opening;
-    if (!existsSync23(db.path)) throw new CtxError("DB_GONE");
+    if (!existsSync24(db.path)) throw new CtxError("DB_GONE");
     return db;
   }
   function stopMarker(configDir, projectKey) {
@@ -61849,7 +61889,7 @@ async function createServerCore(argv, env) {
   }
   function stopRequested() {
     const configDir = resolveConfigDir(process.env);
-    return held.some((db) => existsSync23(stopMarker(configDir, db.projectKey)));
+    return held.some((db) => existsSync24(stopMarker(configDir, db.projectKey)));
   }
   async function journal(project, ctx, name, reply4) {
     const db = await ownDb(project);
