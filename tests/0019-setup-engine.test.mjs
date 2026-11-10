@@ -19,6 +19,7 @@ import { assertWritable, buildRegistry, hostBin, installExitOk, pathEntries, run
 import { generateManifests } from "../build/manifests.ts";
 import { FAKE_APP_SERVER, PLUGIN_EVENTS, PLUGIN_ID, PLUGIN_KEY, hashOf } from "./_lib/codex-fake.mjs";
 import { vscodeUserDirOf } from "../src/core/project/config-dir.ts";
+import { detectV1 } from "../src/core/ops/detect-v1.ts";
 
   // serial: runSetup and runDoctor share in-process state; the tests fail when they overlap
 describe("ADR-0019 section 3: setup engine (setup, doctor, remove, spawn, lock, backup)", () => {
@@ -211,6 +212,58 @@ rl.on("line", (l) => {
     assert.equal(existsSync(path.join(s.home, ".context-mode")), false, "the default data dir is not created");
     assert.equal(runRemove({ home: s.home, env }).exitCode, 0);
     assert.equal(readFileSync(codexToml, "utf8"), CODEX_V1);
+  });
+
+  // #1327 (D-1327-CODEX-ENV-1, wwcxbc, Codex Desktop 26.1103 on Windows, CODEX_HOME=D:\\Codex\\.codex): Codex Desktop starts
+  // the MCP server with a short env allowlist that drops CODEX_HOME, so the server read ~/.codex and D3 said FAIL.
+  test("[#1327] registry: with CODEX_HOME=D:\\Codex\\.codex the codex MCP entry carries env.CODEX_HOME; without it, no env table", () => {
+    const win = buildRegistry({ home: "C:\\Users\\wwcxbc", pkgDir: "C:\\pkg", env: { CODEX_HOME: "D:\\Codex\\.codex" }, platform: "win32" }).find((r) => r.id === "codex");
+    assert.deepEqual(win.config.value.env, { CODEX_HOME: "D:\\Codex\\.codex" });
+    const plain = buildRegistry({ home: "/h", pkgDir: "/abs/pkg", env: {} }).find((r) => r.id === "codex");
+    assert.equal(plain.config.value.env, undefined);
+  });
+
+  test("[#1327] setup writes [mcp_servers.context-mode.env] CODEX_HOME, keeps the user's env keys and env_vars, and a second run changes nothing", async (t) => {
+    const s = sandbox(t);
+    const codexHome = path.join(s.root, "Codex", ".codex");
+    const env = { ...s.env, CODEX_HOME: codexHome };
+    const toml = put(path.join(codexHome, "config.toml"), 'model = "o3"\n\n[mcp_servers.context-mode]\ncommand = "context-mode"\nenv_vars = ["HTTPS_PROXY"]\n\n[mcp_servers.context-mode.env]\nMY_KEY = "mine"\n');
+    const res = await runSetup({ home: s.home, pkgDir: s.pkgDir, env, agents: ["codex"], runId: "r1" });
+    assert.equal(res.exitCode, 0, JSON.stringify(res, null, 2));
+    const text = readFileSync(toml, "utf8");
+    assert.ok(text.includes(`CODEX_HOME = ${JSON.stringify(codexHome)}`), text);
+    assert.ok(text.includes('MY_KEY = "mine"') && text.includes('env_vars = ["HTTPS_PROXY"]'), text);
+    assert.deepEqual(detectV1("codex", s.home, { codexDir: codexHome }).filter((f) => f.file === toml), [], "the env table of the v2 entry is no v1 leftover");
+    const again = await runSetup({ home: s.home, pkgDir: s.pkgDir, env, agents: ["codex"], runId: "r2" });
+    assert.deepEqual(again.agents[0].changes, []);
+    assert.equal(readFileSync(toml, "utf8"), text);
+  });
+
+  // #1328 / #1329 (lisandroprada, fingerprint 2e26442450f2): on Node v23.9.0 setup failed with "mcp: tools/list returned
+  // ctx_doctor, expected ..." and rolled back. Node is checked first: one line with the fix, no write, no rollback.
+  test("[#1328] setup on Node v23.9.0 stops first with one NODE_TOO_OLD line and writes nothing", async (t) => {
+    const s = sandbox(t);
+    const codexToml = put(path.join(s.home, ".codex", "config.toml"), CODEX_V1);
+    const res = await runSetup({ home: s.home, pkgDir: s.pkgDir, env: s.env, agents: ["codex"], runId: "r1", nodeVersion: "v23.9.0" });
+    assert.equal(res.exitCode, 1);
+    assert.deepEqual(res.agents, []);
+    assert.equal(res.error, "Context Mode needs Node 24.15.0 or newer; you have v23.9.0. Fix: nvm install 24, or install it from https://nodejs.org.");
+    assert.equal(readFileSync(codexToml, "utf8"), CODEX_V1);
+    assert.equal(existsSync(path.join(s.home, ".context-mode")), false, "no backup, no lock");
+  });
+
+  test("[#1328] a server that lists only ctx_doctor under an old node is reported as Node too old, not a tools/list mismatch", async (t) => {
+    const s = sandbox(t);
+    const pkgDir = fakePkg(path.join(s.root, "old"), { tools: ["ctx_doctor"] });
+    // The node setup writes into the host config is the one that answers: a shim that reports v23.9.0.
+    const pre = put(path.join(s.root, "oldnode.cjs"), "Object.defineProperty(process, 'version', { value: 'v23.9.0' });");
+    put(path.join(s.home, ".codex", "config.toml"), CODEX_V1);
+    const env = { ...s.env, NODE_OPTIONS: `--require ${pre}` };
+    const res = await runSetup({ home: s.home, pkgDir, env, agents: ["codex"], runId: "r1" });
+    const codex = res.agents.find((a) => a.id === "codex");
+    assert.equal(codex.status, "FAIL", JSON.stringify(res, null, 2));
+    assert.ok(codex.reason.includes("mcp: Node too old: Context Mode needs Node 24.15.0 or newer; you have v23.9.0. Fix: nvm install 24"), codex.reason);
+    assert.ok(!codex.reason.includes("tools/list returned"), codex.reason);
   });
 
   test("setup: second run changes nothing and makes no backup", async (t) => {
@@ -669,7 +722,7 @@ exit 0`);
     writeFileSync(path.join(s.pkgDir, "package.json"), JSON.stringify({ name: "context-mode", version: "2.0.1" }));
     const stale = await runDoctor(opts);
     assert.equal(stale.agents[0].status, "FAIL");
-    assert.equal(stale.agents[0].reason, "copy: Claude Code runs context-mode 2.0.0, the installed package is 2.0.1; run claude plugin update context-mode@context-mode");
+    assert.equal(stale.agents[0].reason, "copy: Claude Code runs context-mode 2.0.0, the installed package is 2.0.1; run claude plugin marketplace update context-mode && claude plugin update context-mode@context-mode");
     writeFileSync(want, installedPlugins(s.home, "2.0.1"));
     writeFileSync(log, "");
     const fixed = await runSetup({ ...opts, runId: "r2" });
@@ -683,17 +736,79 @@ exit 0`);
     assert.equal(manifest.entries.some((e) => e.undo), false, JSON.stringify(manifest));
   });
 
-  test("[US] claude-code: setup that cannot refresh a stale copy is a FAIL that names the copy check", { skip: process.platform === "win32" && "fake agent binaries are sh scripts" }, async (t) => {
+  // #1338 (su69ar, macOS, 2.1.6): Claude Code ran inside an Orca profile, ~/Library/Application Support/orca/claude-profiles/<id>/home,
+  // a HOME of its own. The 1.0.169 plugin was still installed there; setup rolled back with "run claude plugin update ...".
+  // Now setup runs the host's own marketplace update and plugin update with that profile's HOME and CLAUDE_CONFIG_DIR, then re-checks.
+  function orca(t) {
     const s = sandbox(t);
-    const ip = put(path.join(s.home, ".claude", "plugins", "installed_plugins.json"), installedPlugins(s.home, "1.9.0"));
+    const profile = path.join(s.root, "Library", "Application Support", "orca", "claude-profiles", "7f3a9c", "home");
+    mkdirSync(profile, { recursive: true });
+    return { ...s, profile, env: { ...s.env, HOME: profile, USERPROFILE: profile } };
+  }
+
+  test("[US] claude-code (#1338): an Orca profile with the 1.0.169 plugin is updated with the host's own commands in that profile, not rolled back", { skip: process.platform === "win32" && "fake agent binaries are sh scripts" }, async (t) => {
+    const s = orca(t);
+    const log = path.join(s.root, "claude.log");
+    const ip = path.join(s.profile, ".claude", "plugins", "installed_plugins.json");
+    put(ip, installedPlugins(s.profile, "1.0.169"));
+    const want = path.join(s.root, "want.json");
+    writeFileSync(want, installedPlugins(s.profile, "2.0.0"));
+    fakeClaude(s.root, s.bin, `echo "HOME=$HOME $@" >> "${log}"
+case "$1 $2" in
+  "plugin list") echo "context-mode@context-mode" ;;
+  "plugin update") cp "${want}" "${ip}" ;;
+esac
+exit 0`);
+    const res = await runSetup({ home: s.profile, pkgDir: s.pkgDir, env: s.env, agents: ["claude-code"], runId: "r" });
+    assert.equal(res.agents[0].status, "PASS", JSON.stringify(res.agents[0], null, 2));
+    assert.equal(res.agents[0].rolledBack, undefined);
+    const lines = readFileSync(log, "utf8").split("\n");
+    const market = lines.findIndex((l) => l.endsWith("plugin marketplace update context-mode"));
+    const update = lines.findIndex((l) => l.endsWith("plugin update context-mode@context-mode"));
+    assert.ok(market >= 0 && update > market, "marketplace update runs before plugin update: " + lines.join("|"));
+    assert.ok(lines[update].startsWith(`HOME=${s.profile} `), "the update runs with the profile HOME: " + lines[update]);
+    assert.equal(JSON.parse(readFileSync(ip, "utf8")).plugins["context-mode@context-mode"][0].version, "2.0.0");
+    assert.ok(res.agents[0].checks.find((c) => c.name === "copy").ok);
+  });
+
+  test("[US] claude-code (#1338): an update that cannot run ends in a WARN with the exact commands, never a rollback", { skip: process.platform === "win32" && "fake agent binaries are sh scripts" }, async (t) => {
+    const s = orca(t);
+    const ip = put(path.join(s.profile, ".claude", "plugins", "installed_plugins.json"), installedPlugins(s.profile, "1.0.169"));
+    fakeClaude(s.root, s.bin, `case "$1 $2" in
+  "plugin list") echo "context-mode@context-mode" ;;
+  "plugin marketplace") echo "network down" >&2; exit 1 ;;
+  "plugin update") echo "network down" >&2; exit 1 ;;
+esac
+exit 0`);
+    const res = await runSetup({ home: s.profile, pkgDir: s.pkgDir, env: s.env, agents: ["claude-code"], runId: "r" });
+    assert.equal(res.agents[0].status, "PASS", JSON.stringify(res.agents[0], null, 2));
+    assert.equal(res.agents[0].rolledBack, undefined);
+    const copy = res.agents[0].checks.find((c) => c.name === "copy");
+    assert.equal(copy.warn, true);
+    assert.match(copy.detail, /still runs context-mode 1\.0\.169, the installed package is 2\.0\.0/);
+    assert.match(copy.detail, /network down/);
+    assert.ok(copy.detail.endsWith("run claude plugin marketplace update context-mode && claude plugin update context-mode@context-mode"), copy.detail);
+    assert.equal(JSON.parse(readFileSync(ip, "utf8")).plugins["context-mode@context-mode"][0].version, "1.0.169");
+    // doctor tells the truth: the old copy is a FAIL with the same commands.
+    const doc = await runDoctor({ home: s.profile, pkgDir: s.pkgDir, env: s.env, agents: ["claude-code"] });
+    assert.equal(doc.agents[0].status, "FAIL");
+    assert.match(doc.agents[0].reason, /^copy: Claude Code runs context-mode 1\.0\.169, the installed package is 2\.0\.0; run claude plugin marketplace update context-mode && claude plugin update context-mode@context-mode/);
+  });
+
+  test("[US] claude-code (#1338): a CLAUDE_CONFIG_DIR profile is read for the copy and named in the fix commands", { skip: process.platform === "win32" && "fake agent binaries are sh scripts" }, async (t) => {
+    const s = sandbox(t);
+    const cfg = path.join(s.root, "Library", "Application Support", "orca", "claude-profiles", "7f3a9c", "cfg dir");
+    const ip = path.join(cfg, "plugins", "installed_plugins.json");
+    put(ip, installedPlugins(s.home, "1.0.169"));
     fakeClaude(s.root, s.bin, `case "$1 $2" in
   "plugin list") echo "context-mode@context-mode" ;;
 esac
 exit 0`);
-    const res = await runSetup({ home: s.home, pkgDir: s.pkgDir, env: s.env, agents: ["claude-code"], runId: "r" });
-    assert.equal(res.agents[0].status, "FAIL");
-    assert.match(res.agents[0].reason, /^copy: Claude Code runs context-mode 1\.9\.0, the installed package is 2\.0\.0/);
-    assert.equal(JSON.parse(readFileSync(ip, "utf8")).plugins["context-mode@context-mode"][0].version, "1.9.0");
+    const env = { ...s.env, CLAUDE_CONFIG_DIR: cfg };
+    const doc = await runDoctor({ home: s.home, pkgDir: s.pkgDir, env, agents: ["claude-code"] });
+    assert.equal(doc.agents[0].status, "FAIL");
+    const q = `CLAUDE_CONFIG_DIR='${cfg}' `;
+    assert.ok(doc.agents[0].reason.endsWith(`run ${q}claude plugin marketplace update context-mode && ${q}claude plugin update context-mode@context-mode`), doc.agents[0].reason);
   });
 
   // D-NI-CODEX-DOCTOR-1 (ADR-0023): `codex plugin add context-mode@context-mode` installs the npm package as a Codex plugin.

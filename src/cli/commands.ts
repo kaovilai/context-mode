@@ -7,11 +7,15 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { UNSUPPORTED_HOST_LINE } from "../core/ops/unsupported-host.ts";
+import { unsupportedHostOf } from "../core/ops/unsupported-host.ts";
 import * as clack from "@clack/prompts";
 import { ADAPTERS } from "../adapters/table.ts";
 import type { AgentId } from "../core/contracts/agents.ts";
 import { dataRootOf, homeDirOf } from "../core/project/config-dir.ts";
 import { formUrl } from "../core/ops/doctor-issue.ts";
+import { formatError } from "../core/contracts/errors.ts";
+import { nodeTooOld } from "../core/hooks/fallback.ts";
 import { buildRegistry, detectAgents, printPlan, printText, runDoctor, runRemove, runSetup } from "../setup/index.ts";
 import type { AgentResult, SetupContext, SetupResult } from "../setup/index.ts";
 import { HELP, parseFlags, UsageError, type Command, type Flags } from "./args.ts";
@@ -279,6 +283,8 @@ async function setup(ui: Ui): Promise<number> {
   if (f.print) return printManual(ui, f.print);
   if (f.list) return list(ui);
   if (f.remove) return remove(ui);
+  // #1328 D-NODE-OLD-1: Node first, before the agent prompt and any write; one line, no rollback, no report.
+  if (nodeTooOld(process.version)) { err(`context-mode: ${formatError("NODE_TOO_OLD", { v: process.version })}`); return EXIT_FAIL; }
   if (f.dryRun) {
     const plan = await apply(ui, f.agents, true);
     if (f.json) out(JSON.stringify({ command: "setup", dryRun: true, ...plan }));
@@ -328,9 +334,12 @@ async function doctor(ui: Ui): Promise<number> {
     onAgent: (id, phase) => { if (phase === "start") { spin.stop(); spin.start(`${id}: checking`); } else spin.stop(); },
   });
   spin.stop();
+  // D-UNSUPPORTED-HOSTS-1 / D-R53-REVIEW-1: a terminal env var names the host only when no supported agent was found (Claude Code in a Cursor terminal inherits CURSOR_TRACE_ID).
+  const other = res.agents.length === 0 ? unsupportedHostOf({ env: process.env }) : undefined;
+  if (other !== undefined && !ui.f.json) out(UNSUPPORTED_HOST_LINE(other.name));
   if (!res.agents.length && !res.error && !ui.f.json) { out("No agents found. Run context-mode setup --list."); return EXIT_OK; }
   // doctor is read-only: no report file; --debug prints the report to stderr.
-  const code = await finish({ ...ui, clack: undefined }, "doctor", res, false);
+  const code = await finish({ ...ui, clack: undefined }, "doctor", other === undefined ? res : { ...res, unsupportedHost: other.id } as SetupResult, false);
   const p = ui.clack;
   if (!p || code === EXIT_OK) return code;
   let worst = code;

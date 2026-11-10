@@ -13,7 +13,7 @@ import { ctxSearch } from "../src/core/tools/search.ts";
 import { ctxStats } from "../src/core/tools/stats.ts";
 import { chunkText } from "../src/core/index/chunk.ts";
 import { getAdapter, ADAPTERS, hasRecall, hasReplace } from "../src/adapters/table.ts";
-import { COMPACT_POINTER_LINE, OUTPUT_CAP, REPLACE_TRIGGER_BYTES, REPLACE_RETURN_BYTES, REPLACE_CHUNK_BYTES, SYNC_INDEX_MAX_BYTES, PENDING_COMPACT_META_PREFIX, DECISION_OPTION_KEY, DECISION_SOURCE, RECALL_BUDGET_BYTES, RECALL_CLOSE_TAG, RECALL_OPEN_TAG, STATE_BUDGET, D5_LAST_HOOK_ERROR, MCP_HINT_EVERY, PARSE_ERROR_DENY_LINE, POLICY_UNREADABLE_LINE, REPLACE_HANDLE_LINE, REQUIRE_SECURITY_ENV, TOOL_ORDER, prefixToolNames } from "../src/core/contracts/constants.ts";
+import { COMPACT_POINTER_LINE, OUTPUT_CAP, REPLACE_TRIGGER_BYTES, REPLACE_RETURN_BYTES, REPLACE_CHUNK_BYTES, SYNC_INDEX_MAX_BYTES, PENDING_COMPACT_META_PREFIX, DECISION_OPTION_KEY, DECISION_SOURCE, RECALL_BUDGET_BYTES, RECALL_CLOSE_TAG, RECALL_OPEN_TAG, STATE_BUDGET, HOOK_TIMEOUT_MS,D5_LAST_HOOK_ERROR, MCP_HINT_EVERY, PARSE_ERROR_DENY_LINE, POLICY_UNREADABLE_LINE, REPLACE_HANDLE_LINE, REQUIRE_SECURITY_ENV, TOOL_ORDER, prefixToolNames } from "../src/core/contracts/constants.ts";
 import { answerDecisions, askOptionLabels, listOptionLabels, optionEchoDecision } from "../src/core/hooks/decision.ts";
 import { decode } from "../src/adapters/claude-code.ts";
 import { openDb, closeDb, withWrite, metaGet } from "../src/core/store/db.ts";
@@ -130,6 +130,19 @@ describe("PRD-v2 section 10: dispatch, replace and handle line (GP3, GP6)", () =
     assert.deepEqual(out, { stdout: "", exitCode: 0 });
     assert.equal(cap.lines.length, 1);
     assert.ok(cap.lines[0].startsWith("hooks: decode failed: "));
+  });
+
+  // D-CC-USER-MCP-1 (review round): the dual-prefix pick reads the payload before decodeClaudeShape's object
+  // guard, so a non-object payload must still fail with that guard's own line, not a bare TypeError.
+  test("decode failure: a null payload keeps the JSON-object error line", async () => {
+    for (const bad of [null, undefined, 3]) {
+      const cap = captureStderr();
+      let out;
+      try { out = await handleHook("claude-code", bad, env); } finally { cap.restore(); }
+      assert.deepEqual(out, { stdout: "", exitCode: 0 }, JSON.stringify(bad));
+      assert.equal(cap.lines.length, 1, JSON.stringify(bad));
+      assert.ok(cap.lines[0].includes("hook payload is not a JSON object"), cap.lines[0]);
+    }
   });
 
   test("no project: allow, no hint, no DB", async () => {
@@ -443,6 +456,65 @@ describe("PRD-v2 section 10: dispatch, replace and handle line (GP3, GP6)", () =
     }
   });
 
+  // D-M7-RR-3b: an MCP tool names the call in its own keys (web_search: objective + search_queries;
+  // ctx_*: a literal intent). Before, none of those keys was read, so every MCP replace printed
+  // queries:["",...] and ranked on the prompt alone.
+  test("D-M7-RR-3b: an MCP web_search input keeps objective and search_queries as the intent, never an empty query", async () => {
+    const p = cc({
+      hook_event_name: "PostToolUse", tool_name: "mcp__parallel__web_search",
+      tool_input: { objective: "openssl fips build steps", search_queries: ["openssl fips", "go boringcrypto"] },
+      tool_use_id: "toolu_ws", tool_response: bigText(40000),
+    });
+    const out = parsed(await handleHook("claude-code", p, env));
+    assert.equal(typeof out.updatedToolOutput, "string", "an MCP string result replaces as a string");
+    const replaced = out.updatedToolOutput;
+    const more = replaced.slice(replaced.lastIndexOf("\n" + CCP + "ctx_search("));
+    assert.ok(!more.includes('[""]'), "no empty query: " + more);
+    assert.ok(more.includes("openssl fips build steps"), "the first query is the objective: " + more);
+  });
+
+  test("D-M7-RR-3b: an MCP tool with only a query list joins it as the intent", async () => {
+    const p = cc({
+      hook_event_name: "PostToolUse", tool_name: "mcp__search__lookup",
+      tool_input: { queries: ["alpha beta", "gamma"] }, tool_use_id: "toolu_ql", tool_response: bigText(40000),
+    });
+    const out = parsed(await handleHook("claude-code", p, env));
+    const more = out.updatedToolOutput.slice(out.updatedToolOutput.lastIndexOf("\n" + CCP + "ctx_search("));
+    assert.ok(!more.includes('[""]'), "no empty query: " + more);
+    assert.ok(more.includes("alpha beta"), "the joined query list is the intent: " + more);
+  });
+
+  // D-NO-LOSSY-CUT-2 (review round): the intent is echoed in the handle line, and an MCP tool can carry a
+  // multi-KB prompt. The picked intent is cut to ECHO_MAX_BYTES, so the replace stays a pointer, never a
+  // string the size of the output it replaced.
+  test("D-M7-RR-3b: a multi-KB MCP prompt is cut to ECHO_MAX_BYTES, the replace stays small", async () => {
+    const huge = "summarize " + "x".repeat(20000);
+    const p = cc({
+      hook_event_name: "PostToolUse", tool_name: "mcp__gen__summarize",
+      tool_input: { prompt: huge }, tool_use_id: "toolu_hp", tool_response: bigText(26000),
+    });
+    const out = parsed(await handleHook("claude-code", p, env));
+    assert.equal(typeof out.updatedToolOutput, "string");
+    const replaced = out.updatedToolOutput;
+    assert.ok(Buffer.byteLength(replaced) < 1024, "the replace stays a pointer: " + Buffer.byteLength(replaced) + " B");
+    const more = replaced.slice(replaced.lastIndexOf("\n" + CCP + "ctx_search("));
+    assert.ok(!more.includes('[""]'), "no empty query after the cut: " + more);
+    assert.ok(!more.includes("x".repeat(300)), "the echoed intent is cut at ECHO_MAX_BYTES, not whole: " + more.slice(0, 200));
+  });
+
+  // D-CC-USER-MCP-1: a user-scope or project-scope `claude mcp add context-mode` names the tools
+  // mcp__context-mode__ctx_*; before, only the plugin prefix was stripped, the own-tool exemption
+  // (step 1, ADR-0009 §0) missed the call, and the hook replaced ctx_execute's own reply with a
+  // pointer to itself — the "mangled search tool" loop.
+  test("D-CC-USER-MCP-1: a plain mcp add context-mode ctx_execute result is never replaced", async () => {
+    const p = cc({
+      hook_event_name: "PostToolUse", tool_name: "mcp__context-mode__ctx_execute",
+      tool_input: { language: "shell", code: "cat big.log", intent: "read the log" },
+      tool_use_id: "toolu_own", tool_response: bigText(40000),
+    });
+    assert.equal(parsed(await handleHook("claude-code", p, env)), null, "own tool over the trigger is allowed whole");
+  });
+
   // D-R41-READ-OFFSET-1 (#1314, joucarvalho): "Read with offset/limit over 4 KB comes back as a 96 B ctx_search pointer".
   // A bounded Read is the user's own small window: the host's result reaches the model whole. A full Read still replaces.
   test("D-R41-READ-OFFSET-1: a Read with offset or limit over REPLACE_TRIGGER_BYTES is never replaced (#1314)", async () => {
@@ -455,6 +527,22 @@ describe("PRD-v2 section 10: dispatch, replace and handle line (GP3, GP6)", () =
     }
     const full = cc({ hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "/tmp/big.log" }, tool_use_id: "toolu_f", tool_response: { type: "text", file } });
     assert.equal(typeof parsed(await handleHook("claude-code", full, env)).updatedToolOutput, "object", "a full Read over the trigger still replaces");
+  });
+
+  // D-R48-OWN-FILE-1 (#1326): "skill references and rule files under ~/.claude no longer load in full". A full Read of the
+  // agent's own skill file over the trigger reaches the model whole; a project file of the same size still replaces.
+  test("D-R48-OWN-FILE-1: a full Read of a skill reference under ~/.claude is never replaced (#1326)", async () => {
+    const content = bigText(REPLACE_TRIGGER_BYTES * 3);
+    const n = content.split("\n").length;
+    const ref = join(root, ".claude", "skills", "deploy", "references", "api.md");
+    mkdirSync(join(ref, ".."), { recursive: true });
+    writeFileSync(ref, content);
+    const own = { filePath: ref, content, numLines: n, startLine: 1, totalLines: n };
+    const p = cc({ hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: ref }, tool_use_id: "toolu_own", tool_response: { type: "text", file: own } });
+    assert.equal(parsed(await handleHook("claude-code", p, env)), null);
+    const proj = join(repo, "big.md");
+    const q = cc({ hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: proj }, tool_use_id: "toolu_proj", tool_response: { type: "text", file: { ...own, filePath: proj } } });
+    assert.equal(typeof parsed(await handleHook("claude-code", q, env)).updatedToolOutput, "object", "a project file still replaces");
   });
 
   test("D-M7-RR-1: main-agent replace above SYNC_INDEX_MAX_BYTES: in-memory selection, detached index", async () => {
@@ -1029,6 +1117,36 @@ describe("PRD-v2 section 10: compaction delivery, recall and decision rows (GP6)
     // below threshold: an unrelated prompt adds nothing
     const off = await handleHook("claude-code", payload(s, { hook_event_name: "UserPromptSubmit", prompt: "what is the weather" }), env);
     assert.deepEqual(off, { stdout: "", exitCode: 0 });
+  });
+
+  // #1330 (Lcstyle, aron-intframe): the first prompt is 30 KB of the README; a later output holds README lines and
+  // one line the next question is about. The recall query is the current prompt only (D-1330-RECALL-PROMPT-1).
+  test("[M7] recall/long-first-prompt (#1330): the asked-for line ranks first, well inside the hook timeout", async () => {
+    const s = sid();
+    const readme = readFileSync(join(import.meta.dirname, "..", "README.md"), "utf8");
+    await handleHook("claude-code", payload(s, { hook_event_name: "UserPromptSubmit", prompt: readme.slice(0, 30000) }), env);
+    const PLANTED = "redis failover exhausted the connection pool after 37 retries on replica-2";
+    const pool = readme.split("\n").map((l) => l.trim()).filter((l) => l.length >= 20 && l.length <= 400);
+    const lines = [];
+    for (let i = 0, n = 0; n < SYNC_INDEX_MAX_BYTES - 2000; i++) {
+      const l = i === 60 ? PLANTED : pool[i % pool.length];
+      lines.push(l);
+      n += Buffer.byteLength(l, "utf8") + 1;
+    }
+    await handleHook("claude-code", payload(s, {
+      hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "cat build.log", description: "build log" },
+      tool_use_id: "toolu_1330", tool_response: { stdout: lines.join("\n"), stderr: "", interrupted: false, isImage: false },
+    }), env);
+    await waitRows("SELECT 1 FROM line_units WHERE session_id = ?", [s], lines.length);
+    await handleHook("claude-code", payload(s, { hook_event_name: "SessionStart", source: "compact" }), env);
+    const t0 = performance.now();
+    const text = context(await handleHook("claude-code", payload(s, { hook_event_name: "UserPromptSubmit", prompt: "why did redis failover exhaust the pool on replica-2" }), env));
+    const ms = performance.now() - t0;
+    assert.ok(ms < HOOK_TIMEOUT_MS / 2, "recall took " + Math.round(ms) + " ms");
+    assert.ok(text !== null, "no recall block");
+    const units = text.split("\n").filter((l) => l.startsWith("@"));
+    assert.ok(units.length > 0 && units[0].endsWith(" line 61:"), text); // the planted line is the first unit
+    assert.ok(text.includes(PLANTED), text);
   });
 
   test("[M7] recall/pending-flag row (gemini): state block on the first BeforeAgent, recall on a later one", async () => {

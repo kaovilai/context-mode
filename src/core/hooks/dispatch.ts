@@ -6,8 +6,8 @@ const { lstatSync, readFileSync } = process.getBuiltinModule("node:fs") as typeo
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { AGENT_IDS, type AgentId } from "../contracts/agents.ts";
 import {
-  COMPACTED_META_PREFIX, COMPACT_POINTER_LINE, COMPACT_STATE_KEY, DECISION_OPTION_KEY, DECISION_SOURCE, DECISION_TOOL, EDIT_PATH_KEYS, EDIT_TOOLS, EXIT_CODE_LINE_PREFIX,
-  OWN_TOOL_PREFIX, prefixToolNames, REPLACE_CHUNK_BYTES, REPLACE_HANDLE_LINE, REPLACE_RETURN_BYTES, REPLACE_TRIGGER_BYTES, RANGE_READ_TOOLS, READ_RANGE_KEYS, SHAPE_RETURN_BYTES, PARSE_ERROR_DENY_LINE, PENDING_COMPACT_FLAG, PENDING_COMPACT_KEY,
+  COMPACTED_META_PREFIX, COMPACT_POINTER_LINE, COMPACT_STATE_KEY, DECISION_OPTION_KEY, DECISION_SOURCE, DECISION_TOOL, EDIT_PATH_KEYS, EDIT_TOOLS, ECHO_MAX_BYTES, EXIT_CODE_LINE_PREFIX,
+  OWN_TOOL_PREFIX, prefixToolNames, REPLACE_CHUNK_BYTES, REPLACE_HANDLE_LINE, REPLACE_RETURN_BYTES, REPLACE_TRIGGER_BYTES, RANGE_READ_TOOLS, READ_PATH_KEYS, READ_RANGE_KEYS, SHAPE_RETURN_BYTES, PARSE_ERROR_DENY_LINE, PENDING_COMPACT_FLAG, PENDING_COMPACT_KEY,
   PENDING_COMPACT_META_PREFIX, POLICY_UNREADABLE_LINE, RECALL_KEY, RECALL_MAX_ROWS, RECALL_SEEN_META_PREFIX, RECALL_UNIT_CANDIDATES, RECALL_UNITS_SEEN_META_PREFIX, RESUME_HINT, RESUME_HINT_KEY, RUN_WRAPPER_FILE,
   RUN_WRAPPER_NODE, SHELL_TOOL, SOURCE_LABEL_MAX_CHARS, SUBAGENT_SOURCE_PREFIX, SYNC_INDEX_MAX_BYTES, TOOL_PREFIX_SLOT,
   USER_DENY_REASON_PREFIX,
@@ -18,6 +18,7 @@ import type {
 } from "../contracts/types.ts";
 import { getAdapter, hasRecall, hasReplace } from "../../adapters/table.ts";
 import { decide } from "../policy/decide.ts";
+import { isOwnFile } from "../policy/own-file.ts";
 import { isSubagentCall, pickSubagentCase, toolSetForAgentType } from "../policy/subagent.ts";
 import { readUserDeny } from "../policy/user-deny.ts";
 import { resolveProject } from "../project/resolve.ts";
@@ -25,8 +26,8 @@ import { claudeDirOf, homeDirOf } from "../project/config-dir.ts";
 import { isInside } from "../project/contain.ts";
 import { metaGet, metaSet, metaTake, openDb } from "../store/db.ts";
 import { appendEvent, canonicalKey } from "../journal/append.ts";
-import { hasAgentRows, hasSessionRows, readFirstPrompt, readLastPrompt, readRecallRows, readSessionEvents } from "../journal/read.ts";
-import { finishReserved, insertChunks, insertUnits, queryUnits, recallQueryText, reserveSource, sourceHandle, type SourceDraft } from "../store/fts.ts";
+import { hasAgentRows, hasSessionRows, readLastPrompt, readRecallRows, readSessionEvents } from "../journal/read.ts";
+import { finishReserved, headBytes, insertChunks, insertUnits, queryUnits, recallQueryText, reserveSource, sourceHandle, type SourceDraft } from "../store/fts.ts";
 import { buildUnits } from "../index/units.ts";
 import { renderState } from "../compaction/render.ts";
 import { pickRecall } from "../compaction/recall.ts";
@@ -58,6 +59,12 @@ function message(err: unknown): string {
 
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
+}
+
+// D-M7-RR-3b: a query-list field (web_search's search_queries) reads as its joined words, so a
+// search-shaped MCP input keeps a query when no single-string key names the call.
+function listStr(v: unknown): string {
+  return Array.isArray(v) ? v.filter((q): q is string => typeof q === "string" && q.trim() !== "").join(" ") : "";
 }
 
 /** impl/09 §4.2. Never throws: decode, project and dispatch failures all end in this agent's allow shape. */
@@ -237,11 +244,10 @@ async function recall(ev: CanonicalHookEvent, row: AdapterRow, project: ProjectC
   if (metaGet(db, COMPACTED_META_PREFIX + ev.sessionId) === null) return ALLOW;
   const seenKey = RECALL_SEEN_META_PREFIX + ev.sessionId;
   const seen = seenSeqs(metaGet(db, seenKey));
-  // r3-ledger: one ranked query over this session's line units, by the prompt and the session goal.
+  // r3-ledger: one ranked query over this session's line units, by the current prompt only (D-1330-RECALL-PROMPT-1).
   const unitsKey = RECALL_UNITS_SEEN_META_PREFIX + ev.sessionId;
   const seenUnits = seenUnitKeys(metaGet(db, unitsKey));
-  const goal = readFirstPrompt(db, ev.sessionId);
-  const units = queryUnits(db, ev.sessionId, recallQueryText(prompt, goal), RECALL_UNIT_CANDIDATES);
+  const units = queryUnits(db, ev.sessionId, recallQueryText(prompt), RECALL_UNIT_CANDIDATES);
   const picked = pickRecall(readRecallRows(db, ev.sessionId, project.worktree, RECALL_MAX_ROWS), prompt, new Set(seen), units, new Set(seenUnits));
   if (picked.text === "") return ALLOW;
   if (picked.seqs.length > 0) metaSet(db, seenKey, JSON.stringify([...seen, ...picked.seqs]));
@@ -324,7 +330,7 @@ function askDetached(ev: CanonicalHookEvent, project: ProjectContext, tool: Tool
 
 async function preToolUse(ev: CanonicalHookEvent, row: AdapterRow, project: ProjectContext, env: NodeJS.ProcessEnv): Promise<Decision> {
   const userDeny = readUserDeny(project.worktree, ev.agent);
-  const decision0 = decide(ev, row, userDeny);
+  const decision0 = decide(ev, row, userDeny, project);
   let decision = decision0;
   if (decision0.kind === "deny" && isSubagentCall(ev) && !isUserPolicyDeny(decision0.reason, row)) {
     // Case A keeps decision0 (D-M3-H2-4); case B names the run.mjs wrapper for a shell call.
@@ -440,12 +446,20 @@ async function postToolUse(ev: CanonicalHookEvent, row: AdapterRow, project: Pro
   return decision;
 }
 
+/** D-R48-OWN-FILE-1 (#1326): a read-like tool whose target is one of the agent's own instruction or skill files. */
+function ownRead(ev: CanonicalHookEvent, tool: ToolCall, env: NodeJS.ProcessEnv): boolean {
+  if (!RANGE_READ_TOOLS.includes(tool.canonicalName)) return false;
+  const p = READ_PATH_KEYS.map((k) => tool.input[k]).find((v): v is string => typeof v === "string" && v !== "");
+  return p !== undefined && isOwnFile(ev.agent, resolve(ev.cwd, p), env);
+}
+
 async function postReplace(ev: CanonicalHookEvent, row: AdapterRow, project: ProjectContext, env: NodeJS.ProcessEnv,
   tool: ToolCall, result: ToolResultInfo, text: string): Promise<Decision> {
   // step 5: replace, DECISIONS-r9 F1 split. Subagent case B/C (ADR-0016), and the main agent on a row
   // with a replace channel ("run, then replace", D-M7-RR-1, DECISIONS-r10 (1)).
   if (result.bytes <= REPLACE_TRIGGER_BYTES) return ALLOW; // D-M7-SV-1
   if (boundedRead(tool)) return ALLOW; // D-R41-READ-OFFSET-1 (#1314): the user asked for these lines
+  if (ownRead(ev, tool, env)) return ALLOW; // D-R48-OWN-FILE-1 (#1326): a skill or rule file reaches the model whole
   if (result.keep === true) return ALLOW; // D-M2-MCP-1: an MCP result with a non-text block stays as the host made it
   // ADR-0001: one path per row, no runtime fallback. A row with no replace channel gets no replace decision on
   // any path, the subagent one too (D-STATS-RET-2): its encoder drops it, so the model gets the whole output.
@@ -459,8 +473,17 @@ async function postReplace(ev: CanonicalHookEvent, row: AdapterRow, project: Pro
     label = mainLabel(tool, ev);
   }
   // D-M7-RR-3: no description -> the command text, file path, pattern or URL, never an empty query.
-  const intent = [tool.input.description, tool.input.command, tool.input.file_path, tool.input.pattern, tool.input.url]
-    .map(str).find((v) => v.trim() !== "") ?? "";
+  // MCP tools name the call in their own keys: ctx_* carries a literal intent (and objective, path,
+  // query), the common web-search servers an objective and a query list. Those keys are read too, so an
+  // MCP call never indexes under an empty query and the handle line's first query is the call's own words
+  // (before: every MCP replace printed queries:["",...] and ranked on the prompt alone).
+  // D-NO-LOSSY-CUT-2: the intent is echoed in the handle line, so a key over ECHO_MAX_BYTES (a multi-KB
+  // MCP prompt is routine) is cut to that many bytes, whole code points — the replace must never return a
+  // pointer the size of the output it replaced. The head keeps the query useful; ranking reads the same cut.
+  const intent = headBytes([tool.input.description, tool.input.command, tool.input.file_path, tool.input.pattern, tool.input.url,
+    tool.input.intent, tool.input.objective, tool.input.query, tool.input.path, tool.input.prompt,
+    listStr(tool.input.search_queries) || listStr(tool.input.queries)]
+    .map(str).find((v) => v.trim() !== "") ?? "", ECHO_MAX_BYTES);
   // One chunk pass for both forms (D-M7-FT-2): the stored chunks and the selected chunks are the same
   // array, so the in-memory selection equals selectChunks over the stored source without reading it back.
   const chunks = chunkText(text, "text", REPLACE_CHUNK_BYTES); // D-M7-SV-1: small chunks, line-aligned cuts

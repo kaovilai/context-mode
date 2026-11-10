@@ -5,9 +5,9 @@ import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 import { ADAPTERS, getAdapter } from "../adapters/table.ts";
-import { AGENT_HOME_DIR, HOST_NODE_COMMAND, HOST_PLUGINS_DIR_NAME, INSTALLED_PLUGINS_FILE, OPENCODE_BASE_CONFIG_FILE, OWN_MCP_ENTRY, SERVER_KEY, TOOL_ORDER } from "../core/contracts/constants.ts";
+import { AGENT_HOME_DIR, PLUGIN_MARKETPLACE_NAME, HOST_NODE_COMMAND, HOST_PLUGINS_DIR_NAME, INSTALLED_PLUGINS_FILE, MCP_ENV_FIELD, OPENCODE_BASE_CONFIG_FILE, OWN_MCP_ENTRY, SERVER_KEY, SETUP_BACKUP_DIR_NAME, TOOL_ORDER } from "../core/contracts/constants.ts";
 import type { AgentId, AdapterRow, HostConfigFormat } from "../core/contracts/types.ts";
-import { claudeDirOf, copilotDirOf, geminiDirOf, kiroDirOf, opencodeDirOf, ownMcpFileOf } from "../core/project/config-dir.ts";
+import { claudeDirOf, claudeProfileEnv, copilotDirOf, geminiDirOf, kiroDirOf, opencodeDirOf, ownMcpFileOf } from "../core/project/config-dir.ts";
 import { ownMcpValue } from "../core/ops/host-config.ts";
 import { HOOK_SHAPES, type JsonObject } from "./hook-shapes.ts";
 
@@ -16,7 +16,7 @@ export const HOOK_BUNDLE = "hook.mjs";
 export const AGENT_FLAG = "--agent";
 export const STATE_DIR = ".context-mode";
 export const LOCK_FILE = "setup.lock";
-export const BACKUP_DIR = "backups";
+export const BACKUP_DIR = SETUP_BACKUP_DIR_NAME;
 const PLUGIN_ID = `${SERVER_KEY}@${SERVER_KEY}`;
 const SKILLS_DIR_NAME = "skills";
 
@@ -99,7 +99,7 @@ function skillDirPrefixes(dirPath: string): string[] {
   return out;
 }
 
-export interface HostCopy { host: string; bin: string; plugin: string; file: string; refresh: string[]; /** D-CC-HOOKS-RUN-1: the host command that enables a listed but disabled plugin (its hooks run only when enabled). */ enable: string[]; }
+export interface HostCopy { host: string; bin: string; plugin: string; file: string; refresh: string[]; /** #1338: the host command that fetches the marketplace's newest listing; `plugin update` reads that listing, so it runs first. */ marketplace: string[]; /** #1338: env words (CLAUDE_CONFIG_DIR=...) that point a copied command at the profile setup found; "" for the default profile. */ profile: string; /** D-CC-HOOKS-RUN-1: the host command that enables a listed but disabled plugin (its hooks run only when enabled). */ enable: string[]; }
 
 export interface CliPlan { bin: string; install: string[][]; remove: string[][]; input?: string; }
 
@@ -212,7 +212,12 @@ function configFor(ctx: SetupContext, id: AgentId): ConfigTarget | undefined {
     const file = id === "vscode" ? ownMcpFileOf(id, own.file, ctx.env, ctx.home) : agentPath(ctx, id, own.file); // D-WIN-VSCODE-MCP-1
     const format: HostConfigFormat = file.endsWith(".toml") ? "toml" : id === "vscode" ? "jsonc" : "json";
     const also = own.also?.map(([k, v]): [readonly string[], unknown] => [k, v]);
-    return { file, format, key: own.key, value: ownMcpValue(id, node, server), ...(also ? { also } : {}) };
+    // #1327 D-1327-CODEX-ENV-1: Codex Desktop starts the MCP server with a short env allowlist that drops CODEX_HOME; the
+    // entry's env table carries the Codex home setup wrote into, so the server (and its doctor) reads the same dir.
+    const codexHome = id === "codex" ? ctx.env[CODEX_HOME_ENV] : undefined;
+    const base = ownMcpValue(id, node, server);
+    const value = codexHome !== undefined && codexHome !== "" ? { ...base, [MCP_ENV_FIELD]: { [CODEX_HOME_ENV]: codexHome } } : base;
+    return { file, format, key: own.key, value, ...(also ? { also } : {}) };
   }
   if (id === "opencode") { // docs/install/opencode.md: a local MCP entry in opencode.json
     return {
@@ -243,7 +248,8 @@ function cliFor(ctx: SetupContext, id: AgentId): CliPlan | undefined {
 function copyFor(ctx: SetupContext, id: AgentId): HostCopy | undefined {
   if (id !== "claude-code") return undefined;
   const file = path.join(claudeDirOf(ctx.env, ctx.home), HOST_PLUGINS_DIR_NAME, INSTALLED_PLUGINS_FILE);
-  return { host: "Claude Code", bin: "claude", plugin: PLUGIN_ID, file, refresh: ["plugin", "update", PLUGIN_ID], enable: ["plugin", "enable", PLUGIN_ID] };
+  return { host: "Claude Code", bin: "claude", plugin: PLUGIN_ID, file, refresh: ["plugin", "update", PLUGIN_ID], enable: ["plugin", "enable", PLUGIN_ID],
+    marketplace: ["plugin", "marketplace", "update", PLUGIN_MARKETPLACE_NAME], profile: claudeProfileEnv(ctx.env, ctx.platform ?? process.platform) };
 }
 
 const LIST: Partial<Record<AgentId, { bin: string; args: string[] }>> = {

@@ -11,7 +11,7 @@ import {
 import { CtxError } from "../contracts/errors.ts";
 import type { AdapterRow, CtxUpgradeInput, ProjectContext, ToolContext, ToolReply, UpgradeChangeRow } from "../contracts/types.ts";
 import { getAdapter } from "../../adapters/table.ts";
-import { claudeDirOf, copilotDirOf, geminiDirOf, kiroDirOf, opencodeDirOf, piAgentDirOf, requireHomeDir } from "../project/config-dir.ts";
+import { claudeDirOf, hostUpdateCommand, copilotDirOf, geminiDirOf, kiroDirOf, opencodeDirOf, piAgentDirOf, requireHomeDir } from "../project/config-dir.ts";
 import { detectV1 } from "../ops/detect-v1.ts";
 import { regenerateHostConfig, type HostFileWriter } from "../ops/host-write.ts";
 import { ownBundleDir } from "../ops/bundle-dir.ts";
@@ -58,8 +58,8 @@ function pluginRootRow(adapter: AdapterRow, env: NodeJS.ProcessEnv): UpgradeChan
   return root === own ? [] : [row(UPGRADE_PLUGIN_ROOT_AREA, root, own)];
 }
 
-function hostRow(adapter: AdapterRow): UpgradeChangeRow {
-  return row(UPGRADE_HOST_AREA, "", UPGRADE_HOST_COMMAND[adapter.id]);
+function hostRow(adapter: AdapterRow, env: NodeJS.ProcessEnv): UpgradeChangeRow {
+  return row(UPGRADE_HOST_AREA, "", hostUpdateCommand(adapter.id, env)); // #1338: the profile words come from one function, shared with doctor D1
 }
 
 // Steps 4-7. Step 4 is the agent's own update command (the user runs it); step 5 rewrites only context-mode's own
@@ -70,7 +70,7 @@ function upgrade(adapter: AdapterRow, deps: UpgradeDeps, home: string): UpgradeC
     const step5 = regenerateHostConfig(adapter, home, { env: deps.env, write: deps.write });
     const findings = detectV1(adapter.id, home, { project: deps.project.worktree, piAgentDir: piAgentDirOf(deps.env, home), claudeDir: claudeDirOf(deps.env, home), geminiDir: geminiDirOf(deps.env, home), copilotDir: copilotDirOf(deps.env, home), kiroDir: kiroDirOf(deps.env, home), opencodeDir: opencodeDirOf(deps.env, home) });
     removal = removeV1(adapter.id, findings, deps.project.worktree);
-    const rows = [hostRow(adapter), ...step5, ...removal.rows];
+    const rows = [hostRow(adapter, deps.env), ...step5, ...removal.rows];
     removal.commit();
     return rows;
   } catch (err) {

@@ -108,7 +108,7 @@ describe("ADR-0018: contracts (concurrent)", { concurrency: CONC }, () => {
       CONFIG_PARSE_FAILED: { agent: "codex", path: "/home/u/.codex/config.toml", format: "toml" },
     };
     const EXPECTED = {
-      NODE_TOO_OLD: "Node 22.1.0 is below 24.15.0. Fix: install Node 24.15.0 or later.",
+      NODE_TOO_OLD: "Context Mode needs Node 24.15.0 or newer; you have 22.1.0. Fix: nvm install 24, or install it from https://nodejs.org.", // #1328
       NO_SQLITE: "node:sqlite failed to load. Fix: run ctx_doctor.",
       DB_GONE: "context.db is gone and its WAL file is still in place. Fix: run ctx_doctor once; it keeps the WAL file in a dated folder and starts a new index.",
       NO_PROJECT: "Project source spawn-cwd is missing. Fix: run ctx_doctor.",
@@ -565,4 +565,14 @@ describe("ADR-0018: contracts (concurrent)", { concurrency: CONC }, () => {
       assert.deepEqual([...spec.file], [".copilot", "hooks", "context-mode-vscode.json"]);
     });
   });
+});
+
+// D-R48-TRIGGER-1 (#1326 coreycoburn): REPLACE_TRIGGER_BYTES is a documented setting, env CTX_REPLACE_TRIGGER_BYTES.
+test("D-R48-TRIGGER-1: CTX_REPLACE_TRIGGER_BYTES sets the replace trigger; a bad value keeps 4096 (#1326)", () => {
+  assert.equal(C.REPLACE_TRIGGER_ENV, "CTX_REPLACE_TRIGGER_BYTES");
+  assert.equal(C.REPLACE_TRIGGER_BYTES_DEFAULT, 4096);
+  assert.equal(C.readReplaceTrigger(undefined), 4096);
+  assert.equal(C.readReplaceTrigger(""), 4096);
+  assert.equal(C.readReplaceTrigger("8192"), 8192);
+  for (const bad of ["0", "-5", "1.5", "abc", "1e400"]) assert.equal(C.readReplaceTrigger(bad), 4096, bad);
 });

@@ -26,7 +26,18 @@ export const SYNC_INDEX_MAX_BYTES = 65536; // DECISIONS-r9 F1
 // D-M7-SV-1: the PostToolUse replace path has its own sizes, separate from OUTPUT_CAP (which stays the cap for
 // replies and the Read deny threshold). A result over REPLACE_TRIGGER_BYTES is indexed whole and the model gets
 // whole BM25-selected chunks of at most REPLACE_CHUNK_BYTES each, within REPLACE_RETURN_BYTES, plus the more line.
-export const REPLACE_TRIGGER_BYTES = 4096;
+// D-R48-TRIGGER-1 (#1326 coreycoburn): a documented setting, env CTX_REPLACE_TRIGGER_BYTES (a positive safe integer),
+// read once at process start; default 4096. Bench (bench/replay.mjs, 602 files, 28,390 calls, 37.9 MB): trigger 4096
+// saves 41.99% (1,878 replaces), 6144 saves 30.89% (998), 8192 saves 23.34% (582): raising it costs a quarter to
+// half of the saving, so the default stays; a user who wants 2-6 KB outputs whole sets the env var.
+export const REPLACE_TRIGGER_BYTES_DEFAULT = 4096;
+export const REPLACE_TRIGGER_ENV = "CTX_REPLACE_TRIGGER_BYTES";
+export function readReplaceTrigger(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return REPLACE_TRIGGER_BYTES_DEFAULT;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n > 0 ? n : REPLACE_TRIGGER_BYTES_DEFAULT;
+}
+export const REPLACE_TRIGGER_BYTES = readReplaceTrigger(process.env[REPLACE_TRIGGER_ENV]);
 // D-R41-READ-OFFSET-1 (#1314): a read-like tool (canonical name) called with a range key is the user's own window:
 // PostToolUse lets it through whole. Claude Code, Pi, Gemini: offset/limit; VS Code read_file and Copilot view map to them.
 export const RANGE_READ_TOOLS = Object.freeze(["Read", "view"]);
@@ -91,6 +102,10 @@ export const SOURCE_HANDLE_MAX_DIGITS = 10;
 // Time budgets (ms)
 export const EXEC_TIMEOUT_MS = 600000; // S-TIMEOUT, Q8: default and max
 export const KILL_GRACE_MS = 1000; // GP4
+// D-1337-EXIT-SETTLE-1 (#1337): after the child exits, runProcess waits this long for the pipes to end; each data chunk restarts it.
+export const PIPE_EOF_GRACE_MS = 250;
+// D-1337-EXIT-SETTLE-1: the most time the pipe drain may take after exit, so a survivor that keeps writing cannot hold the call.
+export const PIPE_DRAIN_MAX_MS = 2000;
 export const DB_TIMEOUT_MS = 5000; // ADR-0002, PRD §4
 export const DB_WAL_SUFFIX = "-wal"; // impl/02 §6.1 step 4, DEVIATIONS D-M1-T5-1: WAL sibling of context.db
 export const DB_SHM_SUFFIX = "-shm"; // impl/02 §6.1 step 4, DEVIATIONS D-M1-T5-1: shared-memory sibling of context.db
@@ -134,6 +149,8 @@ export const SHELL_FAMILY: readonly string[] = Object.freeze(["sh", "bash", "zsh
 export const PATHEXT_DEFAULT = ".COM;.EXE;.BAT;.CMD"; // impl/03 §2 step 3: Windows PATHEXT when the env var is unset
 export const FETCH_MAX_HOPS = 5; // impl/03 §6 step 5: redirect hops; one more is FETCH_FAILED
 export const SOURCE_LABEL_MAX_CHARS = 80; // impl/04 §2.3 step 15, §4 step 7: label = "<tool>:" + first line of the code, at most 80 chars
+// D-1337-EXIT-SETTLE-1: appended to a ctx_execute reply when the command exited but a background process still held its output pipes.
+export const BACKGROUND_HOLD_NOTE = "note: the command ended while a background process still held its output; that process was stopped, so output it would write later does not exist.";
 export const CANCELLED_LINE = "Cancelled."; // impl/04 §2.3 step 11: reply on ctx.signal abort (not an ERROR_TEXT key)
 export const BACKGROUND_REPLY_PREFIX = "started in background, pid "; // impl/04 §2.3 step 9, A11 (DECISIONS-r9 S5): + decimal pid, nothing after
 export const PLAIN_OUTPUT_ENV: Readonly<Record<string, string>> = Object.freeze({ NO_COLOR: "1", FORCE_COLOR: "0" }); // impl/04 §2.3 step 6: plain child output (ctx_execute and run.mjs, D-M3-X1-4)
@@ -235,6 +252,8 @@ export const MAX_NEST_DEPTH = 32; // impl/08 §2.3 step 2a, ADR-0008 "Parse erro
 // impl/08 §6.1 step 6: Read (or one-file shell dump) over OUTPUT_CAP with no offset/limit. The text is the
 // src/prompt/hooks/read-deny.md template (D-DU-DENY-1, src/core/policy/read-deny.ts); this caps its fixed bytes.
 export const READ_DENY_FIXED_CAP = 120;
+// D-R48-OWN-FILE-1 (#1326): the shared skill dir of the Agent Skills layout (~/.agents/skills), read by several agents.
+export const SHARED_SKILLS_DIR = Object.freeze([".agents", "skills"] as const);
 
 // impl/08 §6.2, ADR-0008 "Deny message" (kept verbatim). Lines, joined by "\n":
 //   DENY_PREFIX + DENY_WHAT[kind] + DENY_WHAT_SUFFIX
@@ -350,10 +369,14 @@ const READ_IMAGES_AND_PDF: readonly ReadMediaType[] = Object.freeze([...READ_IMA
 /** Per host, the media its own read tool returns as a block (host source checked, D-R47-READ-MEDIA-1). Claude Code
  *  Read: images + PDF blocks. Gemini/Qwen read_file: inlineData. OpenCode read: MEDIA_MIMES (png, jpeg, gif, webp, pdf).
  *  Pi read: image attachments, a PDF comes back as text. VS Code read_file: images go to its own view_image tool.
+ *  ZCode Read (#1333, zai-org/ZCode a9fe401e apps/zcode-cli/packages/core/src/tool/handlers/read.ts:185, read-image.ts:134):
+ *  png/jpeg/gif/webp become an image block; a PDF is a block only when the model has supportsPdf (read.ts:195), else text.
+ *  Codex has no Read tool (images go to its own view_image, codex-rs core/src/tools/handlers/view_image.rs:75); copilot-cli
+ *  ships a closed binary and kiro a closed host, so no media path is checked there.
  *  A host with no checked media path keeps the size deny for every file. */
 export const READ_MEDIA_BY_AGENT: Readonly<Record<AgentId, readonly ReadMediaType[]>> = Object.freeze({
   "claude-code": READ_IMAGES_AND_PDF, gemini: READ_IMAGES_AND_PDF, qwen: READ_IMAGES_AND_PDF, opencode: READ_IMAGES_AND_PDF,
-  pi: READ_IMAGES, vscode: READ_IMAGES, "copilot-cli": [], codex: [], kiro: [], zcode: [],
+  pi: READ_IMAGES, vscode: READ_IMAGES, zcode: READ_IMAGES, "copilot-cli": [], codex: [], kiro: [],
 });
 
 // impl/09 §4 hooks dispatch (DEVIATIONS D-M3-H2-1..6). Keys and texts the dispatch reads; no numbers.
@@ -376,6 +399,9 @@ export const RECALL_MAX_ROWS = 340; // newest rows read per prompt (= MAX_CANDID
 export const COMPACTED_META_PREFIX = "compacted:"; // meta key + session id: a compaction happened in this session
 export const RECALL_UNITS_SEEN_META_PREFIX = "recall_units_seen:"; // r3-ledger: JSON "source:ord" list of line units already injected
 export const UNITS_ANCESTOR_FACTOR = 8; // D-UNITS-BOUND-1: ancestor copies per output <= this x its bytes (0 of 680k units in 3520 real files drop a parent at 8)
+// D-1330-RECALL-PROMPT-1 (#1330): the recall query is the current prompt only, its first distinct words up to this
+// count, so a long prompt costs the same as a 64-word one (aron-intframe: prompt only 1 ms, 31/40 found).
+export const RECALL_QUERY_MAX_TERMS = 64;
 export const RECALL_UNIT_CANDIDATES = 64; // r3-ledger: line units read per recall query (one ranked FTS query)
 export const RECALL_SEEN_META_PREFIX = "recall_seen:"; // meta key + session id: JSON seq list already injected
 export const RECALL_OPEN_TAG = "<context_mode_recall>";
@@ -527,7 +553,7 @@ export function DOCTOR_FAIL_LINE(host: string, check: string, cause: string, com
 }
 export const DOCTOR_FIX_UPGRADE = "run ctx_upgrade"; // D1, D3, D4, D8 stale schema
 export const D1_DEV_BUILD_DETAIL = "dev build: source checkout; release builds stamp the sha"; // D-DOCTOR-FIX-1 shorter row; // UNKNOWN: BUNDLE_SHA unset (D-M5-arch-5, D-DOCTOR-ISSUE-1 names the cause)
-export const D1_UPDATE_DETAIL = "update available"; // FAIL (D-M5-arch-5)
+export const D1_UPDATE_DETAIL = "update available"; // WARN with the agent's own update command (D-R49-DOCTOR-1339-1; was FAIL in D-M5-arch-5)
 // D-DOCTOR-D1-CAUSE-1: every D1 detail starts with the installed version and the short bundle sha, then names the exact cause.
 export const D1_SHORT_SHA_LEN = 7;
 export const D1_PACKAGE_FILE = "package.json"; // <bundleDir>/package.json holds the installed version (OUT_PACKAGE_JSON)
@@ -562,8 +588,9 @@ export const D1_REGISTRY_URL = "https://registry.npmjs.org/-/package/context-mod
 export const D1_PRERELEASE_SEP = "-"; // 2.0.0-next.26: the text after "-" up to "." is the dist-tag
 export const D1_DEFAULT_TAG = "latest"; // a version with no prerelease part
 export const GIT_LS_REMOTE = "ls-remote"; // git ls-remote --tags --refs <RELEASE_REPO_URL> v*
-export const D2_NODE_FIX = `install Node ${NODE_MIN} or later`;
-export function D2_NODE_DETAIL(version: string): string { return `Node ${version} is below ${NODE_MIN}`; }
+// #1328 D-NODE-OLD-1: one text for cli, server (ctx_doctor D2), hook and setup; errors.ts NODE_TOO_OLD is the same line.
+export const D2_NODE_FIX = `nvm install ${NODE_MIN.split(".")[0]}, or install it from https://nodejs.org`;
+export function D2_NODE_DETAIL(version: string): string { return `Context Mode needs Node ${NODE_MIN} or newer; you have ${version}`; }
 export const D2_SQLITE_DETAIL = "node:sqlite failed to load";
 export const D2_SQLITE_FIX = "run ctx_doctor";
 export function D2_BUN_DETAIL(version: string): string { return `running under Bun ${version}`; }
@@ -576,6 +603,7 @@ export const D5B_FIX = "disable chat.useClaudeHooks or the Claude Code hooks blo
 export const VSCODE_CLAUDE_HOOKS_SETTING = "chat.useClaudeHooks"; // D5b
 export const VSCODE_SETTINGS_FILE = "settings.json"; // <repo>/.vscode/settings.json (D5b)
 export const D6_UNKNOWN_DETAIL = "no clientInfo or protocolVersion on the request"; // UNKNOWN, never FAIL
+export const D6_IN_PROCESS_DETAIL = "in-process plugin: this call ran inside the agent, no MCP session to read"; // PASS (D-R49-DOCTOR-1339-3)
 export function D7_DETAIL(got: string): string { return `resolved project source ${got} does not match the host's actual cwd`; }
 export const D7_FIX = "restart the agent in the correct directory";
 export function D8_STALE_SCHEMA_DETAIL(got: number, want: number): string { return `stale schema (v${got}, expected v${want})`; }
@@ -690,6 +718,32 @@ export const D3_PART_JOIN = ", ";
 export function D3_DETAIL(parts: readonly string[]): string { return `wrong: ${parts.join(D3_PART_JOIN)}`; }
 // D-DOC-D3-SCOPE-1: two or more live installs and none is the one Claude Code runs for this project.
 export function D3_ROOT_DETAIL(paths: readonly string[]): string { return `pick one install for this project: ${paths.join(D3_PART_JOIN)}`; }
+// D-UNSUPPORTED-HOSTS-1 (owner: "Sadece Antigravity icin degil desteklemediklerimize desteklemiyoruz diye desin"; #1340 first case).
+// Hosts that 1.x supported and 2.0 does not. Every field comes from v1.0.169 (src/adapters/client-map.ts, detect.ts), not a guess.
+// clientNames: MCP clientInfo.name, lower case. envVars: set by the host itself. pluginPaths: dir segments a plugin bundle sits in.
+// configDirs: the host's home dirs (data for the docs; a dir alone never proves the host runs, so detection ignores it).
+export interface UnsupportedHost { id: string; name: string; clientNames: readonly string[]; envVars: readonly string[]; pluginPaths: readonly (readonly string[])[]; configDirs: readonly string[]; binaries: readonly string[]; source: string; }
+const unsupported = (h: UnsupportedHost): UnsupportedHost => Object.freeze(h);
+export const UNSUPPORTED_HOSTS: readonly UnsupportedHost[] = Object.freeze([
+  unsupported({ id: "antigravity", name: "Antigravity", clientNames: ["antigravity", "antigravity-client", "antigravity-cli", "agy"], envVars: ["ANTIGRAVITY_CLI_ALIAS"],
+    pluginPaths: [[".gemini", "config", "plugins"], [".gemini", "antigravity", "plugins"], [".gemini", "antigravity-cli", "plugins"], [".gemini", "antigravity-ide", "plugins"]],
+    configDirs: [".gemini/antigravity", ".gemini/antigravity-cli", ".gemini/config"], binaries: ["agy"], source: "v1.0.169:src/adapters/client-map.ts:15-17; detect.ts:156,481-483; #1340" }),
+  unsupported({ id: "cursor", name: "Cursor", clientNames: ["cursor-vscode"], envVars: ["CURSOR_TRACE_ID", "CURSOR_CLI", "CURSOR_CWD"],
+    pluginPaths: [], configDirs: [".cursor"], binaries: [], source: "v1.0.169:src/adapters/client-map.ts:18; detect.ts:163-165,584" }),
+  unsupported({ id: "omp", name: "OMP (oh-my-pi)", clientNames: ["omp-coding-agent"], envVars: [],
+    pluginPaths: [], configDirs: [".omp"], binaries: ["omp"], source: "v1.0.169:src/adapters/client-map.ts:37; detect.ts:543 (PI_CODING_AGENT_DIR is not a signal: supported Pi reads it too)" }),
+  unsupported({ id: "openclaw", name: "OpenClaw", clientNames: [], envVars: [],
+    pluginPaths: [], configDirs: [".openclaw"], binaries: [], source: "v1.0.169:src/adapters/detect.ts:252,575 (the runtime sets no env var)" }),
+  unsupported({ id: "kimi", name: "Kimi Code", clientNames: ["kimi-code", "kimi"], envVars: [],
+    pluginPaths: [], configDirs: [".kimi-code"], binaries: ["kimi"], source: "v1.0.169:src/adapters/client-map.ts:42-44; detect.ts:567; adapters/kimi/index.ts:127" }),
+  unsupported({ id: "kilo", name: "Kilo Code", clientNames: ["kilo code"], envVars: ["KILO", "KILO_PID"],
+    pluginPaths: [], configDirs: [".config/kilo"], binaries: [], source: "v1.0.169:src/adapters/client-map.ts:28; detect.ts:170-171,592" }),
+  unsupported({ id: "zed", name: "Zed", clientNames: ["zed"], envVars: ["ZED_SESSION_ID", "ZED_TERM"],
+    pluginPaths: [], configDirs: [".config/zed"], binaries: [], source: "v1.0.169:src/adapters/client-map.ts:38-39; detect.ts:189-190,616" }),
+  unsupported({ id: "jetbrains-copilot", name: "JetBrains Copilot", clientNames: ["jetbrains client", "intellij idea", "pycharm"], envVars: ["IDEA_INITIAL_DIRECTORY"],
+    pluginPaths: [], configDirs: [".config/JetBrains"], binaries: [], source: "v1.0.169:src/adapters/client-map.ts:23-25; detect.ts:213,600" }),
+]);
+export const SUPPORTED_AGENTS_DOCS_URL = "https://github.com/mksglu/context-mode/blob/main/docs/install/README.md";
 export const D3_ROOT_FIX_JOIN = " or ";
 export function D3_ROOT_FIX(installs: readonly { key: string; scope: string }[]): string {
   return `remove the extra install: ${installs.map((i) => `claude plugin uninstall ${i.key} --scope ${i.scope}`).join(D3_ROOT_FIX_JOIN)}`;
@@ -738,6 +792,8 @@ export const D5_SHAPE_DETAIL = "hook output is not the agent's native shape";
 // D-D5-READ-SHAPE-1 (#1304): the PostToolUse Read probe got an updatedToolOutput that is not Read's own output object.
 // D-R41-READ-OFFSET-1 (#1314): the PostToolUse probe of a bounded Read (offset/limit) got a replace instead of the lines.
 export const D5_READ_RANGE_DETAIL = "PostToolUse Read with offset/limit over the replace trigger came back replaced: a bounded Read must reach the model whole";
+// D-R48-OWN-FILE-1 (#1326): a PreToolUse Read of a skill reference over the one-read limit under the agent's own config dir.
+export const D5_READ_OWN_DETAIL = "PreToolUse Read of a skill file over the one-read limit under the agent's own config dir came back denied: skill and rule files must reach the model whole (#1326)";
 export const D5_READ_MEDIA_DETAIL = "PreToolUse Read of a PNG over the one-read limit came back denied: an image Read must reach the model as an image block (#1321)";
 export const D5_READ_SHAPE_DETAIL = "PostToolUse Read replace is not Read's output shape {type:\"text\", file:{filePath, content, numLines, startLine, totalLines}}: Claude Code drops it and shows a hook warning";
 export function D5_SLOW_DETAIL(ms: number): string { return `hook round trip took ${ms} ms over bare node, over ${HOOK_P95_MS} ms`; }
@@ -747,6 +803,16 @@ export const D5_FIX = "run ctx_upgrade"; // a broken hook entry is a broken inst
 // doctor-db.ts: D8 checks, D9 counts, D10 mode (impl/07 §5).
 export const PRAGMA_INTEGRITY_CHECK = "PRAGMA integrity_check";
 export function D10_DETAIL(mode: string): string { return `enforcement mode: ${mode}`; }
+// D-1331-OC-PERM-1 (#1331): D10 also reports whether the host permission check runs before each ctx_* tool.
+export function D10_PERMISSION_DETAIL(mode: string): string { return `enforcement mode: ${mode}; OpenCode permission rules apply to ctx_* tools`; }
+export const D10_PERMISSION_MISSING_DETAIL = "this OpenCode build gives plugins no permission check (ctx.permission.assert), so ctx_* tools cannot follow OpenCode permission rules";
+export const D10_PERMISSION_FIX = "opencode upgrade";
+// D-1331-OC-PERM-1: the action names the OpenCode built-in tools assert (2.x: core chunks shell/read/webfetch tools; 1.x: "bash").
+export const OC_SHELL_ACTION = "shell";
+export const OC_LEGACY_SHELL_ACTION = "bash";
+export const OC_READ_ACTION = "read";
+export const OC_WEBFETCH_ACTION = "webfetch";
+export const OC_ANY_RESOURCE = "*";
 // D11 shell (D-VT-WINBASH-1).
 export const D11_WIN_DETAIL = "Git Bash not found"; export const D11_WIN_FIX = "install Git for Windows";
 export const D11_POSIX_DETAIL = "no sh on PATH"; export const D11_POSIX_FIX = "install sh or add it to PATH";
@@ -811,6 +877,8 @@ export const SETTINGS_FILE = "settings.json"; // claude-code, gemini, qwen; pi u
 export const CLAUDE_USER_CONFIG_FILE = ".claude.json"; // $HOME/.claude.json
 export const HOOKS_JSON_FILE = "hooks.json"; // codex, zcode cli/
 export const CLAUDE_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"; // D-WF-CC-CONFIG-1: Claude Code user dir override (default ~/.claude)
+export const SETUP_BACKUP_DIR_NAME = "backups"; // <data root>/backups/<run id>/manifest.json: one setup run (setup/engine.ts Run)
+export const SETUP_MANIFEST_FILE = "manifest.json"; // #1327 D-1327-CODEX-ENV-1: the doctor reads which Codex config.toml setup wrote
 export const CODEX_HOME_ENV = "CODEX_HOME"; // D-N6-CODEX-HOME-2: Codex reads config.toml and hooks.json from here (default ~/.codex)
 export const COPILOT_HOME_ENV = "COPILOT_HOME"; // D-WIN-COPILOT-HOME-1: Copilot CLI replaces ~/.copilot as a whole with it (hooks/, skills/)
 export const GEMINI_CLI_HOME_ENV = "GEMINI_CLI_HOME"; // D-R38-GEMINI-HOME-1: gemini-cli homedir() reads it before os.homedir(); <it>/.gemini holds settings.json and extensions/
@@ -922,6 +990,8 @@ export const HOST_CONFIG_TEXT_PATH = "(given text)"; // CONFIG_PARSE_FAILED <pat
 export const JSON_INDENT_UNIT = "  "; // indent for a file with no indented member to copy from
 export const MCP_COMMAND_FIELD = "command";
 export const MCP_ARGS_FIELD = "args";
+export const MCP_ENV_FIELD = "env"; // #1327 D-1327-CODEX-ENV-1: Codex passes this table to the MCP server process (mcp_types.rs env)
+export const MCP_ENV_VARS_FIELD = "env_vars"; // #1327: Codex forwards these named vars from its own env
 // The one host config file (segments under $HOME; VS Code: the name inside its user dir, ownMcpFileOf) and key path of context-mode's own MCP entry, for the
 // agents whose MCP entry lives in a host config file (installMode config-mcp, mcp-entry, hooks+mcp).
 // fields = host-required members of the entry next to command/args; also = sibling key paths the host needs set

@@ -421,6 +421,23 @@ describe("ADR-0020 adapters", () => {
       assert.equal(ev.tool.name, "mcp__plugin_context-mode_context-mode__ctx_execute");
     });
 
+    // D-CC-USER-MCP-1: a user-scope or project-scope `claude mcp add context-mode` (or a host that registers the
+    // server under its plain name) surfaces the same tools as mcp__context-mode__<tool>. Only the plugin prefix
+    // was stripped before, so the own-tool exemption in dispatch missed these calls and the hook replaced its
+    // own ctx_search/ctx_execute replies with pointers to themselves.
+    test("D-CC-USER-MCP-1: decode maps a plain mcp add context-mode tool name to the bare ctx_* name", () => {
+      const pre = decode({ ...base, hook_event_name: "PreToolUse", tool_name: "mcp__context-mode__ctx_execute", tool_input: { code: "1" } });
+      assert.equal(pre.tool.canonicalName, "ctx_execute");
+      assert.equal(pre.tool.name, "mcp__context-mode__ctx_execute");
+      const post = decode({ ...base, hook_event_name: "PostToolUse", tool_name: "mcp__context-mode__ctx_search", tool_input: { queries: ["a"] }, tool_response: "rows" });
+      assert.equal(post.tool.canonicalName, "ctx_search");
+    });
+
+    test("D-CC-USER-MCP-1: a server whose name merely starts like ours stays a foreign MCP tool", () => {
+      const ev = decode({ ...base, hook_event_name: "PreToolUse", tool_name: "mcp__context-mode-elsewhere__ctx_execute", tool_input: {} });
+      assert.equal(ev.tool.canonicalName, "mcp:context-mode-elsewhere:ctx_execute");
+    });
+
     test("decode maps another MCP server's tool to mcp:<server>:<tool>", () => {
       const ev = decode({ ...base, hook_event_name: "PreToolUse", tool_name: "mcp__github__list_issues", tool_input: {} });
       assert.equal(ev.tool.canonicalName, "mcp:github:list_issues");
