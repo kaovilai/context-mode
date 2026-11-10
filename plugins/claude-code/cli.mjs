@@ -8,7 +8,7 @@ var __export = (target, all) => {
 
 // src/entries/cli.ts
 import { spawn as spawn4 } from "node:child_process";
-import { readFileSync as readFileSync14, realpathSync as realpathSync11 } from "node:fs";
+import { readFileSync as readFileSync15, realpathSync as realpathSync11 } from "node:fs";
 import path14 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
@@ -310,6 +310,7 @@ var DOCTOR_LABEL = Object.freeze({
 var DAEMON_CHECK_FIX = "context-mode daemon --install";
 var DAEMON_CHECK_PASS_DETAIL = "shared daemon reachable";
 var DAEMON_CHECK_DOWN_DETAIL = "no daemon answers on the configured port";
+var CLAUDE_ENTRY_CHECK_DETAIL = "user-scope claude-code MCP entry mcpServers.context-mode in ~/.claude.json duplicates the plugin's daemon URL, so Claude Code drops the plugin's MCP entry (and its session header)";
 var REPORT_SOURCE_LABEL = "ctx_doctor:report";
 var REPORT_POINTER = `ctx_search({queries:["FAIL","PASS","UNKNOWN"], source:${JSON.stringify(REPORT_SOURCE_LABEL)}})`;
 var GIT_LS_REMOTE_TAG_ARGS = Object.freeze(["--tags", "--refs"]);
@@ -1972,7 +1973,7 @@ Examples:
 // src/cli/commands.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
 import { createHash as createHash2 } from "node:crypto";
-import { existsSync as existsSync18, mkdirSync as mkdirSync6, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync19, mkdirSync as mkdirSync6, writeFileSync as writeFileSync4 } from "node:fs";
 import os from "node:os";
 import path13 from "node:path";
 
@@ -4999,6 +5000,10 @@ function realOrSelf(path15) {
 function claudeDirOf(env, home) {
   const dir = env[CLAUDE_CONFIG_DIR_ENV];
   return dir !== void 0 && dir !== "" ? dir : join2(home, ...AGENT_HOME_DIR["claude-code"]);
+}
+function claudeUserConfigOf(env, home) {
+  const dir = env[CLAUDE_CONFIG_DIR_ENV];
+  return join2(dir !== void 0 && dir !== "" ? dir : home, CLAUDE_USER_CONFIG_FILE);
 }
 function claudeProfileEnv(env, platform = process.platform) {
   const dir = env[CLAUDE_CONFIG_DIR_ENV];
@@ -8429,6 +8434,9 @@ function buildRegistry(ctx) {
     const skillInstall = skillInstallFor(ctx, row);
     const copilotSettings = id === "copilot-cli" ? agentPath(ctx, id, [COPILOT_DIR, "settings.json"]) : void 0;
     const writes = [
+      // 2.2.6: setup removes the user-scope `claude mcp add` entry from Claude Code's user config (it
+      // suppresses the plugin's own MCP entry; see engine.ts planClaudeUserEntry). Only the marketplace row.
+      ...id === "claude-code" && row.installMode === "marketplace" ? [claudeUserConfigOf(ctx.env, ctx.home)] : [],
       ...copilotSettings ? [copilotSettings] : [],
       ...config ? [config.file] : [],
       ...hookFiles.map((h2) => h2.file),
@@ -9116,7 +9124,7 @@ function listCopilotHooks(env, file, cwd) {
 
 // src/setup/engine.ts
 import { spawn as spawn3, spawnSync as spawnSync4 } from "node:child_process";
-import { closeSync as closeSync3, existsSync as existsSync17, mkdirSync as mkdirSync5, mkdtempSync, openSync as openSync3, readFileSync as readFileSync12, readSync as readSync3, readdirSync as readdirSync6, realpathSync as realpathSync9, rmSync as rmSync2, statSync as statSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { closeSync as closeSync3, existsSync as existsSync18, mkdirSync as mkdirSync5, mkdtempSync, openSync as openSync3, readFileSync as readFileSync13, readSync as readSync3, readdirSync as readdirSync6, realpathSync as realpathSync9, rmSync as rmSync2, statSync as statSync2, writeFileSync as writeFileSync3 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import path12 from "node:path";
 
@@ -9128,6 +9136,25 @@ function daemonConfiguredPort(env) {
     if (port >= 1 && port <= 65535) return port;
   }
   return DAEMON_DEFAULT_PORT;
+}
+
+// src/core/ops/claude-entry.ts
+import { existsSync as existsSync17, readFileSync as readFileSync12 } from "node:fs";
+function claudeUserMcpEntry(env, home) {
+  const file = claudeUserConfigOf(env, home);
+  if (!existsSync17(file)) return void 0;
+  let doc;
+  try {
+    doc = JSON.parse(readFileSync12(file, "utf8"));
+  } catch {
+    return void 0;
+  }
+  const entry2 = typeof doc === "object" && doc !== null ? doc[MCP_SERVERS_KEY] : void 0;
+  if (typeof entry2 !== "object" || entry2 === null || Array.isArray(entry2)) return void 0;
+  const own2 = entry2[SERVER_KEY];
+  if (typeof own2 !== "object" || own2 === null || Array.isArray(own2)) return void 0;
+  const url = own2.url;
+  return { url: typeof url === "string" ? url : "" };
 }
 
 // src/setup/hook-sample.ts
@@ -9224,9 +9251,9 @@ function isNativeBinary(file) {
 function owningPackage(dir) {
   for (let d = dir; ; d = path12.dirname(d)) {
     const f2 = path12.join(d, "package.json");
-    if (existsSync17(f2)) {
+    if (existsSync18(f2)) {
       try {
-        return String(JSON.parse(hostText(readFileSync12(f2, "utf8"))).name);
+        return String(JSON.parse(hostText(readFileSync13(f2, "utf8"))).name);
       } catch {
         return void 0;
       }
@@ -9242,7 +9269,7 @@ function hostBin(bin, env, platform = process.platform) {
   for (const dir of pathEntries(get("PATH") ?? "", platform)) {
     const own2 = which(bin, { PATH: dir, ...get("PATHEXT") ? { PATHEXT: get("PATHEXT") } : {} }, platform);
     for (const f2 of [own2, ...real2.extra.map((p3) => path12.join(dir, ...p3))]) {
-      if (!f2 || !existsSync17(f2) || !statSync2(f2).isFile()) continue;
+      if (!f2 || !existsSync18(f2) || !statSync2(f2).isFile()) continue;
       const file = realpathSync9(f2);
       if (isNativeBinary(file) || owningPackage(path12.dirname(file)) === real2.pkg) return { file, shims };
       shims.push(f2);
@@ -9259,10 +9286,10 @@ function runBin(bin, args, env, input, timeout = VERIFY_TIMEOUT_MS) {
   return spawnShim(hostBin(bin, env).file ?? bin, args, env, { encoding: "utf8", input, timeout, maxBuffer: Infinity });
 }
 function readOr(file) {
-  return existsSync17(file) ? hostText(readFileSync12(file, "utf8")) : void 0;
+  return existsSync18(file) ? hostText(readFileSync13(file, "utf8")) : void 0;
 }
 function readRaw(file) {
-  return existsSync17(file) ? readFileSync12(file, "utf8") : void 0;
+  return existsSync18(file) ? readFileSync13(file, "utf8") : void 0;
 }
 var atomicWrite = atomicWriteFile;
 function pidAlive(pid) {
@@ -9407,7 +9434,7 @@ function isNativeSpec(e) {
 function isStaleOwnPlugin(e, entry2) {
   if (typeof e !== "string" || e === entry2 || !path12.isAbsolute(e)) return false;
   if (e === path12.join(entry2, ...OPENCODE_PLUGIN_PATH)) return true;
-  if (existsSync17(e)) return false;
+  if (existsSync18(e)) return false;
   const seg = e.split("\\").join("/").split("/");
   const n3 = seg.length;
   if (n3 >= 3 && seg[n3 - 1] === "plugin.js" && seg[n3 - 2] === "opencode" && seg[n3 - 3] === "context-mode") return true;
@@ -9471,11 +9498,36 @@ function planSkills(row, edits) {
   const s = row.skillInstall;
   if (s.kind !== "dir") return;
   for (const f2 of s.files) {
-    if (!existsSync17(f2.src)) throw new Error(`preflight: ${f2.src} is missing`);
-    const after = renderSkill(readFileSync12(f2.src, "utf8"), s.prefixes);
+    if (!existsSync18(f2.src)) throw new Error(`preflight: ${f2.src} is missing`);
+    const after = renderSkill(readFileSync13(f2.src, "utf8"), s.prefixes);
     const before = readRaw(f2.file);
     if (before !== after) edits.push({ plain: true, file: f2.file, before, after, changes: [{ file: f2.file, path: f2.name, before: before === void 0 ? null : "old", after: "SKILL.md" }] });
   }
+}
+function planClaudeUserEntry(row, ctx) {
+  if (row.id !== "claude-code" || row.installMode !== "marketplace") return void 0;
+  const file = claudeUserConfigOf(ctx.env, ctx.home);
+  const before = readOr(file);
+  if (before === void 0) return void 0;
+  let cur;
+  try {
+    cur = JSON.parse(before);
+  } catch {
+    return void 0;
+  }
+  const servers = isObj5(cur) ? cur[MCP_SERVERS_KEY] : void 0;
+  if (!isObj5(servers) || !isObj5(servers[SERVER_KEY])) return void 0;
+  const kept = { ...servers };
+  delete kept[SERVER_KEY];
+  let res;
+  try {
+    res = editHostConfigText(row.id, file, before, "json", [[[MCP_SERVERS_KEY], kept]]);
+  } catch (e) {
+    if (e instanceof CtxError) return void 0;
+    throw e;
+  }
+  if (res.edits.length === 0) return void 0;
+  return { file, before, after: res.text, changes: res.edits.map((e) => ({ file, ...e })) };
 }
 function planRow(row, listed, stale, env, disabled = false) {
   const edits = [];
@@ -9606,7 +9658,7 @@ function hookEnabledCheck(row, status) {
 }
 function packageVersion(pkgDir) {
   try {
-    const v = JSON.parse(hostText(readFileSync12(path12.join(pkgDir, "package.json"), "utf8"))).version;
+    const v = JSON.parse(hostText(readFileSync13(path12.join(pkgDir, "package.json"), "utf8"))).version;
     return typeof v === "string" ? v : void 0;
   } catch {
     return void 0;
@@ -9827,7 +9879,7 @@ var SEEN_SQL = "SELECT 1 FROM events WHERE agent = ? LIMIT 1";
 var NOT_SEEN_LINE = "not seen yet, run one tool call";
 function hookSeenCheck(row, dataRoot) {
   const base = path12.join(dataRoot, PROJECTS_DIR_NAME);
-  const dirs = existsSync17(base) ? readdirSync6(base) : [];
+  const dirs = existsSync18(base) ? readdirSync6(base) : [];
   let sqlite;
   try {
     sqlite = process.getBuiltinModule("node:sqlite");
@@ -9836,7 +9888,7 @@ function hookSeenCheck(row, dataRoot) {
   }
   for (const d of dirs) {
     const file = path12.join(base, d, DB_FILE_NAME);
-    if (!sqlite || !existsSync17(file)) continue;
+    if (!sqlite || !existsSync18(file)) continue;
     let db;
     try {
       db = new sqlite.DatabaseSync(file, { readOnly: true });
@@ -9853,17 +9905,17 @@ function skillsCheck(row, pkgDir) {
   const s = row.skillInstall;
   if (s.kind === "package") {
     const files = COMMAND_SKILLS.map((n3) => path12.join(pkgDir, s.via, n3, SKILL_FILE));
-    const miss = files.filter((f2) => !existsSync17(f2));
+    const miss = files.filter((f2) => !existsSync18(f2));
     if (miss.length) return { name: "skills", ok: false, detail: `missing ${miss.join(", ")}` };
     const own2 = getAdapter(row.id).toolNamePrefix + SKILL_TOOL_STEM;
     const foreign = [...new Set(ADAPTERS.map((r2) => r2.toolNamePrefix + SKILL_TOOL_STEM))].filter((n3) => n3 !== SKILL_TOOL_STEM && n3 !== own2);
     const bad2 = files.filter((f2) => {
-      const t2 = readFileSync12(f2, "utf8");
+      const t2 = readFileSync13(f2, "utf8");
       return !t2.includes(own2) && foreign.some((n3) => t2.includes(n3));
     });
     return { name: "skills", ok: bad2.length === 0, detail: bad2.length ? `${bad2.join(", ")} without the ${own2}* tool name` : void 0 };
   }
-  const bad = s.files.filter((f2) => readRaw(f2.file) !== (existsSync17(f2.src) ? renderSkill(readFileSync12(f2.src, "utf8"), s.prefixes) : void 0));
+  const bad = s.files.filter((f2) => readRaw(f2.file) !== (existsSync18(f2.src) ? renderSkill(readFileSync13(f2.src, "utf8"), s.prefixes) : void 0));
   return { name: "skills", ok: bad.length === 0, detail: bad.length ? `${bad.map((f2) => f2.file).join(", ")} missing or without the ${s.prefixes.join(" / ") || "plain"} tool prefix` : void 0 };
 }
 var CODEX_CONFIG_FILE2 = "config.toml";
@@ -10086,6 +10138,12 @@ async function enableCopilotHooks(row, ctx, run) {
   return edit.edits.map((e) => ({ file: settings2, ...e }));
 }
 var isObjSetup = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+function claudeEntryCheck(row, ctx) {
+  if (row.id !== "claude-code") return void 0;
+  const entry2 = claudeUserMcpEntry(ctx.env, ctx.home);
+  if (entry2 === void 0) return void 0;
+  return { name: "claude-entry", ok: true, warn: true, detail: CLAUDE_ENTRY_CHECK_DETAIL + (entry2.url === "" ? "" : ` (${entry2.url})`) };
+}
 async function verifyRow(row, ctx) {
   const env = ctx.env;
   const checks = [parseCheck(row)];
@@ -10096,6 +10154,8 @@ async function verifyRow(row, ctx) {
   if (cp) checks.push(cp);
   checks.push(await mcpCheck(row.serverCommand, env));
   if (row.installMode === "marketplace") checks.push(await daemonCheck(env));
+  const cc = claudeEntryCheck(row, ctx);
+  if (cc) checks.push(cc);
   if (row.hookCommand) checks.push(hookCheck(row, env));
   checks.push(hookRegisteredCheck(row, env, l));
   const en = hookEnabledCheck(row, ls.status);
@@ -10144,7 +10204,7 @@ function undo(dir, entries, env) {
       continue;
     }
     if (!e.file) continue;
-    if (e.existed && e.backup) atomicWrite(e.file, readFileSync12(path12.join(dir, e.backup), "utf8"));
+    if (e.existed && e.backup) atomicWrite(e.file, readFileSync13(path12.join(dir, e.backup), "utf8"));
     else unlinkWithRetry(e.file);
   }
 }
@@ -10159,7 +10219,7 @@ function takeLock(root, runId) {
       if (e.code !== "EEXIST") throw e;
       let pid = 0;
       try {
-        pid = Number(JSON.parse(readFileSync12(file, "utf8")).pid);
+        pid = Number(JSON.parse(readFileSync13(file, "utf8")).pid);
       } catch {
       }
       if (pid && pidAlive(pid)) return `setup lock ${file} is held by pid ${pid}; wait for that run or remove the lock`;
@@ -10177,7 +10237,7 @@ function agentHomeDir(id, ctx) {
   return path12.join(ctx.home, ...AGENT_HOME_DIR[id]);
 }
 function detectAgents(reg, ctx) {
-  return reg.filter((r2) => existsSync17(agentHomeDir(r2.id, ctx)) || r2.listCommand && which(r2.listCommand.bin, ctx.env)).map((r2) => r2.id);
+  return reg.filter((r2) => existsSync18(agentHomeDir(r2.id, ctx)) || r2.listCommand && which(r2.listCommand.bin, ctx.env)).map((r2) => r2.id);
 }
 async function runSetup(opts) {
   const ctx = { home: opts.home, pkgDir: opts.pkgDir, env: opts.env };
@@ -10186,7 +10246,7 @@ async function runSetup(opts) {
   const nodeVersion = opts.nodeVersion ?? process.version;
   if (nodeTooOld(nodeVersion)) return { exitCode: 1, agents: [], error: formatError("NODE_TOO_OLD", { v: nodeVersion }) };
   for (const f2 of ["server.mjs", "hook.mjs"]) {
-    if (!existsSync17(path12.join(ctx.pkgDir, f2))) return { exitCode: 1, agents: [], error: `preflight: ${path12.join(ctx.pkgDir, f2)} is missing` };
+    if (!existsSync18(path12.join(ctx.pkgDir, f2))) return { exitCode: 1, agents: [], error: `preflight: ${path12.join(ctx.pkgDir, f2)} is missing` };
   }
   const ids = opts.agents ?? detectAgents(reg, ctx);
   const root = dataRootOf(ctx.env, ctx.home);
@@ -10238,6 +10298,8 @@ async function setupRow(row, ctx, run, dryRun) {
     if (ls.broken) return { ...res, status: "SKIPPED", reason: ls.broken };
     const listed = ls.check?.ok === true;
     plan = planRow(row, listed, copyCheck(row, ctx.pkgDir)?.ok === false, ctx.env, listed && ls.status === "disabled");
+    const claudeEntry = planClaudeUserEntry(row, ctx);
+    if (claudeEntry) plan.edits.push(claudeEntry);
   } catch (e) {
     return { ...res, status: "FAIL", reason: e.message };
   }
@@ -10290,7 +10352,7 @@ async function runDoctor(opts) {
   const ctx = { home: opts.home, pkgDir: opts.pkgDir, env: opts.env };
   const reg = buildRegistry(ctx);
   for (const f2 of ["server.mjs", "hook.mjs"]) {
-    if (!existsSync17(path12.join(ctx.pkgDir, f2))) return { exitCode: 1, agents: [], error: `preflight: ${path12.join(ctx.pkgDir, f2)} is missing` };
+    if (!existsSync18(path12.join(ctx.pkgDir, f2))) return { exitCode: 1, agents: [], error: `preflight: ${path12.join(ctx.pkgDir, f2)} is missing` };
   }
   const ids = opts.agents ?? detectAgents(reg, ctx);
   const run = new Run(dataRootOf(ctx.env, ctx.home), "doctor");
@@ -10365,14 +10427,14 @@ function runRemove(opts) {
   const env = opts.env ?? process.env;
   const root = dataRootOf(env, opts.home);
   const base = path12.join(root, BACKUP_DIR);
-  if (!existsSync17(base)) return { exitCode: 0, restored: 0 };
+  if (!existsSync18(base)) return { exitCode: 0, restored: 0 };
   const held = takeLock(root, "remove");
   if (held) return { exitCode: 1, restored: 0, error: held };
   let restored = 0;
   try {
-    const runs = readdirSync6(base).map((r2) => path12.join(base, r2)).filter((d) => existsSync17(path12.join(d, MANIFEST))).sort().reverse();
+    const runs = readdirSync6(base).map((r2) => path12.join(base, r2)).filter((d) => existsSync18(path12.join(d, MANIFEST))).sort().reverse();
     for (const dir of runs) {
-      const m3 = JSON.parse(readFileSync12(path12.join(dir, MANIFEST), "utf8"));
+      const m3 = JSON.parse(readFileSync13(path12.join(dir, MANIFEST), "utf8"));
       undo(dir, m3.entries, env);
       restored += m3.entries.length;
       renameWithRetry(path12.join(dir, MANIFEST), path12.join(dir, MANIFEST_DONE));
@@ -10384,7 +10446,7 @@ function runRemove(opts) {
 }
 
 // src/setup/print.ts
-import { readFileSync as readFileSync13 } from "node:fs";
+import { readFileSync as readFileSync14 } from "node:fs";
 var SHELL_SAFE_PUNCT = "@%+=:,./-_";
 function isShellSafe(s) {
   if (s === "") return false;
@@ -10412,7 +10474,7 @@ function printPlan(row, env) {
   else if (h2.kind === "plugin-list") steps.push({ kind: "hook", file: h2.file, block: JSON.stringify({ [h2.key[0]]: [h2.entry] }, null, 2) + "\n" });
   const sk = row.skillInstall;
   if (sk.kind === "dir") {
-    for (const f2 of sk.files) steps.push({ kind: "skill", file: f2.file, block: renderSkill(readFileSync13(f2.src, "utf8"), sk.prefixes) });
+    for (const f2 of sk.files) steps.push({ kind: "skill", file: f2.file, block: renderSkill(readFileSync14(f2.src, "utf8"), sk.prefixes) });
   }
   return { agent: row.id, steps, verify: `context-mode doctor --agents ${row.id}` };
 }
@@ -10840,7 +10902,7 @@ async function upgrade(ui) {
   }
   const root = `${spawnSync5(npm, ["root", "-g"], { env: ui.ctx.env, encoding: "utf8", shell, windowsHide: true }).stdout ?? ""}`.trim();
   const cli = path13.join(root, "context-mode", "cli.mjs");
-  if (!root || !existsSync18(cli)) {
+  if (!root || !existsSync19(cli)) {
     err(`FAIL upgrade: ${cli} not found after ${install}. Fix: ${install}`);
     return EXIT_FAIL;
   }
@@ -10940,7 +11002,7 @@ function main() {
   const dir = path14.dirname(realpathSync11(fileURLToPath3(import.meta.url)));
   let version = "";
   try {
-    version = String(JSON.parse(readFileSync14(path14.join(dir, PACKAGE_FILE), "utf8")).version);
+    version = String(JSON.parse(readFileSync15(path14.join(dir, PACKAGE_FILE), "utf8")).version);
   } catch (err2) {
     process.stderr.write(`${SERVER_KEY}: cannot read ${PACKAGE_FILE}: ${err2.message}
 `);

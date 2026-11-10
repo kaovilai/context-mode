@@ -70,5 +70,5 @@
     "url": "git+https://github.com/mksglu/context-mode.git"
   },
   "type": "module",
-  "version": "2.2.5"
+  "version": "2.2.6"
 }
