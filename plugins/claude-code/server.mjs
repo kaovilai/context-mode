@@ -6,10 +6,7 @@ var __export = (target, all) => {
 };
 
 // src/entries/server.ts
-import { randomUUID } from "node:crypto";
-import { existsSync as existsSync23, realpathSync as realpathSync12, rmSync as rmSync9 } from "node:fs";
-import { dirname as dirname13, join as join23 } from "node:path";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create = Object.create;
@@ -3487,7 +3484,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack2, resolve10) {
+function isRecursive(inst, stack2, resolve7) {
   const cached4 = recursive.get(inst);
   if (cached4 !== void 0)
     return cached4 ? PROVEN : NONE;
@@ -3497,7 +3494,7 @@ function isRecursive(inst, stack2, resolve10) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer3 = isRecursive(child, stack2, resolve10);
+      const answer3 = isRecursive(child, stack2, resolve7);
       if (answer3 > result)
         result = answer3;
     }
@@ -3508,7 +3505,7 @@ function isRecursive(inst, stack2, resolve10) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack2, resolve10) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack2, resolve7) : NONE;
       if (child > answer3)
         answer3 = child;
     }
@@ -3572,7 +3569,7 @@ function isRecursive(inst, stack2, resolve10) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve10 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve7 ? inst._zod.innerType : void 0);
       merge5(inner ? isRecursive(inner, stack2, false) : ASSUMED);
       break;
     }
@@ -11016,7 +11013,7 @@ var recursive2 = /* @__PURE__ */ new WeakMap();
 var NONE2 = 0;
 var ASSUMED2 = 1;
 var PROVEN2 = 2;
-function isRecursive2(inst, stack2, resolve10) {
+function isRecursive2(inst, stack2, resolve7) {
   const cached4 = recursive2.get(inst);
   if (cached4 !== void 0)
     return cached4 ? PROVEN2 : NONE2;
@@ -11026,7 +11023,7 @@ function isRecursive2(inst, stack2, resolve10) {
   let result = NONE2;
   const check2 = (child) => {
     if (result !== PROVEN2 && child?._zod) {
-      const answer3 = isRecursive2(child, stack2, resolve10);
+      const answer3 = isRecursive2(child, stack2, resolve7);
       if (answer3 > result)
         result = answer3;
     }
@@ -11037,7 +11034,7 @@ function isRecursive2(inst, stack2, resolve10) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED2 : desc.value?._zod ? isRecursive2(desc.value, stack2, resolve10) : NONE2;
+      const child = desc.get ? ASSUMED2 : desc.value?._zod ? isRecursive2(desc.value, stack2, resolve7) : NONE2;
       if (child > answer3)
         answer3 = child;
     }
@@ -11101,7 +11098,7 @@ function isRecursive2(inst, stack2, resolve10) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve10 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve7 ? inst._zod.innerType : void 0);
       merge5(inner ? isRecursive2(inner, stack2, false) : ASSUMED2);
       break;
     }
@@ -17705,14 +17702,14 @@ function inputRequiredRoundsExceededMessage(method, maxRounds) {
   return `Multi-round-trip request '${method}' still required input after ${maxRounds} rounds (inputRequired.maxRounds)`;
 }
 function sleep(ms, signal) {
-  return new Promise((resolve10, reject) => {
+  return new Promise((resolve7, reject) => {
     if (signal?.aborted) {
       reject(signal.reason instanceof SdkError ? signal.reason : new SdkError(SdkErrorCode.RequestTimeout, String(signal.reason)));
       return;
     }
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      resolve10();
+      resolve7();
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
@@ -18511,7 +18508,7 @@ var Protocol = class {
     const flowStartedAt = Date.now();
     let onAbort;
     let cleanupMessageId;
-    return new Promise((resolve10, reject) => {
+    return new Promise((resolve7, reject) => {
       const earlyReject = (error42) => {
         reject(error42);
       };
@@ -18580,7 +18577,7 @@ var Protocol = class {
         }
         if (decoded.kind === "invalid") return reject(decoded.error);
         if (decoded.kind === "input_required") {
-          if (options?.allowInputRequired === true) return resolve10(manualInputRequiredValue(decoded));
+          if (options?.allowInputRequired === true) return resolve7(manualInputRequiredValue(decoded));
           const flow = {
             codec,
             request: request2,
@@ -18592,11 +18589,11 @@ var Protocol = class {
               params
             }, resultSchema, legOptions)
           };
-          return resolve10(this._resolveNonCompleteResult(decoded, flow));
+          return resolve7(this._resolveNonCompleteResult(decoded, flow));
         }
         const result = decoded.result;
         validateStandardSchema(resultSchema, result).then((parseResult) => {
-          if (parseResult.success) resolve10(parseResult.data);
+          if (parseResult.success) resolve7(parseResult.data);
           else reject(new SdkError(SdkErrorCode.InvalidResult, `Invalid result for ${request2.method}: ${parseResult.error}`));
         }, reject);
       });
@@ -21512,7 +21509,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin((exports) => {
     ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
     const schOrFunc = root.refs[ref];
     if (schOrFunc) return schOrFunc;
-    let _sch = resolve10.call(this, root, ref);
+    let _sch = resolve7.call(this, root, ref);
     if (_sch === void 0) {
       const schema = (_a5 = root.localRefs) === null || _a5 === void 0 ? void 0 : _a5[ref];
       const { schemaId } = this.opts;
@@ -21538,7 +21535,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin((exports) => {
   function sameSchemaEnv(s1, s2) {
     return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
   }
-  function resolve10(root, ref) {
+  function resolve7(root, ref) {
     let sch;
     while (typeof (sch = this.refs[ref]) == "string") ref = sch;
     return sch || this.schemas[ref] || resolveSchema.call(this, root, ref);
@@ -21988,7 +21985,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin((exports, module) => {
     else if (typeof uri === "object") uri = parse6(serialize(uri, options), options);
     return uri;
   }
-  function resolve10(baseURI, relativeURI, options) {
+  function resolve7(baseURI, relativeURI, options) {
     const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
     const resolved = resolveComponent(parse6(baseURI, schemelessOptions), parse6(relativeURI, schemelessOptions), schemelessOptions, true);
     schemelessOptions.skipEscape = true;
@@ -22162,7 +22159,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin((exports, module) => {
   const fastUri = {
     SCHEMES,
     normalize: normalize2,
-    resolve: resolve10,
+    resolve: resolve7,
     resolveComponent,
     equal,
     serialize,
@@ -27550,9 +27547,6 @@ function unwrapOptionalSchema(schema) {
   return schema.def?.innerType ?? schema;
 }
 
-// node_modules/@modelcontextprotocol/server/dist/index.mjs
-var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
-
 // node_modules/@modelcontextprotocol/server/dist/stdio.mjs
 var swallowsErrorsAfterClose = Symbol("swallowsErrorsAfterClose");
 var StdioServerTransport = class {
@@ -27627,7 +27621,7 @@ var StdioServerTransport = class {
   }
   send(message2) {
     if (this._closed) return Promise.reject(/* @__PURE__ */ new Error("StdioServerTransport is closed"));
-    return new Promise((resolve10, reject) => {
+    return new Promise((resolve7, reject) => {
       const json2 = serializeMessage(message2);
       let settled = false;
       const onError = (error42) => {
@@ -27642,14 +27636,14 @@ var StdioServerTransport = class {
         settled = true;
         this._stdout.off("error", onError);
         this._stdout.off("drain", onDrain);
-        resolve10();
+        resolve7();
       };
       this._stdout.once("error", onError);
       if (this._stdout.write(json2)) {
         if (settled) return;
         settled = true;
         this._stdout.off("error", onError);
-        resolve10();
+        resolve7();
       } else if (!settled) this._stdout.once("drain", onDrain);
     });
   }
@@ -27703,14 +27697,14 @@ var StdioConnectionChannel = class {
   */
   async whenRequestsAnswered(timeoutMs) {
     if (this._closed || this._pendingRequests.size === 0) return true;
-    return await new Promise((resolve10) => {
+    return await new Promise((resolve7) => {
       const waiter = () => {
         clearTimeout(timer);
-        resolve10(true);
+        resolve7(true);
       };
       const timer = setTimeout(() => {
         this._drainWaiters = this._drainWaiters.filter((pending) => pending !== waiter);
-        resolve10(false);
+        resolve7(false);
       }, timeoutMs);
       this._drainWaiters.push(waiter);
     });
@@ -28051,9 +28045,6 @@ function toError(value) {
   return value instanceof Error ? value : new Error(String(value));
 }
 
-// src/core/contracts/agents.ts
-var AGENT_IDS = ["claude-code", "codex", "gemini", "qwen", "copilot-cli", "vscode", "kiro", "zcode", "pi", "opencode"];
-
 // src/core/contracts/constants.ts
 var SERVER_KEY = "context-mode";
 var TOOL_ORDER = Object.freeze(["ctx_execute", "ctx_batch", "ctx_index", "ctx_search", "ctx_resume", "ctx_stats", "ctx_doctor", "ctx_upgrade", "ctx_purge"]);
@@ -28264,6 +28255,16 @@ var PLAIN_OUTPUT_ENV = Object.freeze({ NO_COLOR: "1", FORCE_COLOR: "0" });
 var RUN_LABEL_PREFIX = "run.mjs:";
 var RUN_SESSION_PREFIX = "mcp:";
 var HOST_SESSION_ENV = Object.freeze({ "claude-code": "CLAUDE_CODE_SESSION_ID" });
+var DAEMON_HOST = "127.0.0.1";
+var DAEMON_DEFAULT_PORT = 8790;
+var DAEMON_PORT_ENV = "CONTEXT_MODE_DAEMON_PORT";
+var DAEMON_PATH = "/mcp";
+var DAEMON_HEALTH_PATH = "/healthz";
+var DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}`;
+function daemonUrlOf(port) {
+  return `http://${DAEMON_HOST}:${port}${DAEMON_PATH}`;
+}
+var DAEMON_PROBE_TIMEOUT_MS = 1500;
 var NODE_MIN = "24.15.0";
 var DATA_ROOT = "~/.context-mode";
 var DATA_DIR_ENV = "CONTEXT_MODE_DATA_DIR";
@@ -28446,7 +28447,7 @@ function PURGE_SUMMARY(rows, scope) {
 var DECISION_SOURCE = "decision";
 var DECISION_USER_LABEL = "decision (user)";
 var RELEASE_REPO_URL = "https://github.com/mksglu/context-mode.git";
-var BUNDLE_SHA = true ? "92c1ad26d57b45e786a3dc9149549c416badca09" : void 0;
+var BUNDLE_SHA = true ? "2ab139cda78d4252e6fcb342ff711bf94f1e9232" : void 0;
 var DOCTOR_CHECK_ORDER = Object.freeze(["D1", "D2", "D3", "D4", "D5", "D5b", "D6", "D7", "D8", "D9", "D10", "D11"]);
 var DOCTOR_LABEL = Object.freeze({
   D1: "version",
@@ -28462,6 +28463,11 @@ var DOCTOR_LABEL = Object.freeze({
   D10: "enforcement mode",
   D11: "shell"
 });
+var DAEMON_CHECK_LABEL = "daemon";
+var DAEMON_CHECK_FIX = "context-mode daemon --install";
+var DAEMON_CHECK_PASS_DETAIL = "shared daemon reachable";
+var DAEMON_CHECK_SELF_DETAIL = "this process is the shared daemon";
+var DAEMON_CHECK_DOWN_DETAIL = "no daemon answers on the configured port";
 var HOOK_FIXTURE_DIR = "fixtures";
 var HOOK_FIXTURE_FILE = "hook-roundtrip.json";
 var HOOK_ENTRY_FILE = "hook.mjs";
@@ -28581,7 +28587,6 @@ var D8_ORPHAN_HEALED_FIX = "run ctx_doctor again; D8 then reads PASS";
 function D8_ORPHAN_MOVE_FAILED(detail, cause) {
   return `${detail}; moving them aside failed: ${cause}`;
 }
-var DOCTOR_TOOL_NAME = "ctx_doctor";
 function JOURNAL_SKIPPED_LINE(cause) {
   return `Journal row for this call skipped: ${cause}`;
 }
@@ -28850,14 +28855,6 @@ var V1_SCRIPT_NAMES = Object.freeze([
 var V1_HOOK_COMMAND = "context-mode hook";
 var V1_CODEX_HOOK_COMMAND = "context-mode hook codex";
 var V1_CODEX_HOOKS_DIR = Object.freeze(["hooks", "codex"]);
-var V1_CODEX_SCRIPT_NAMES = Object.freeze([
-  "pretooluse.mjs",
-  "posttooluse.mjs",
-  "sessionstart.mjs",
-  "precompact.mjs",
-  "userpromptsubmit.mjs",
-  "stop.mjs"
-]);
 var V1_CACHE_HEAL_NAME = "context-mode-cache-heal";
 var V1_CACHE_HEAL_EXTS = Object.freeze([".mjs", ".sh"]);
 var V1_STATUSLINE_COMMAND = "context-mode statusline";
@@ -28917,6 +28914,7 @@ var PI_NPM_LATEST = `${V1_PI_PACKAGE}${NPM_VERSION_SEP}latest`;
 var V1_DATA_DIR_NAME = "context-mode";
 var V1_DATA_ROOT_ENTRIES = Object.freeze(["content", "platform.json"]);
 var V1_SESSIONS_DIR_NAME = "sessions";
+var V1_SCRIPT_EXT = ".mjs";
 var V1_BIN_COMMAND = SERVER_KEY;
 var VSCODE_MCP_SERVERS_KEY = "servers";
 var ZCODE_EVENTS_KEY = "events";
@@ -28932,7 +28930,7 @@ var V1_REASON = Object.freeze({
   cacheHealFile: "old context-mode cache-heal script file",
   statusLine: "old context-mode statusLine (context-mode statusline): report only, never removed",
   mcpEntry: "old context-mode MCP entry mcpServers.context-mode",
-  codexHook: "old context-mode Codex hook entry: context-mode hook codex or hooks/codex/<event>.mjs",
+  codexHook: "old context-mode Codex hook entry: context-mode hook codex or hooks/codex/*.mjs",
   codexToml: "old context-mode config.toml [mcp_servers.context-mode*] section",
   hookFile: "old context-mode hook file context-mode.json (runs context-mode hook)",
   vscodeMcp: "old context-mode MCP entry servers.context-mode in .vscode/mcp.json: report only, never removed",
@@ -28970,6 +28968,7 @@ var HOST_CONFIG_TEXT_PATH = "(given text)";
 var JSON_INDENT_UNIT = "  ";
 var MCP_COMMAND_FIELD = "command";
 var MCP_ARGS_FIELD = "args";
+var MCP_ENV_FIELD = "env";
 var ZCODE_MCP_FEATURE_KEY = Object.freeze(["features", "mcp"]);
 var CODEX_OMIT_TOOLS_FROM_FIELD = "omit_tools_from";
 var CODEX_OMIT_DEFERRED = Object.freeze(["deferred"]);
@@ -29084,6 +29083,51 @@ var NATIVE_INSTALL = Object.freeze({
 var ISSUE_FORM_URL = `https://github.com/${ISSUE_REPO_SLUG}/issues/new?template=${ISSUE_FORM_FILE}`;
 var DOCTOR_GIT_VERSION_TIMEOUT_MS = 5e3;
 var DOCTOR_LOG_TAIL_BYTES = 262144;
+
+// src/core/lifecycle/exit.ts
+function installExitGuard(opts) {
+  if (opts.isTTY) return;
+  process.stdin.once("end", () => {
+    opts.onShutdown();
+    const sigtermTimer = setTimeout(() => {
+      console.error("context-mode: still running " + EXIT_SIGTERM_MS + " ms after SIGTERM");
+    }, EXIT_SIGTERM_MS);
+    const sigkillTimer = setTimeout(() => {
+      process.kill(process.pid, "SIGKILL");
+    }, EXIT_SIGKILL_MS);
+    sigtermTimer.unref();
+    sigkillTimer.unref();
+    process.once("exit", () => {
+      clearTimeout(sigtermTimer);
+      clearTimeout(sigkillTimer);
+    });
+    process.kill(process.pid, "SIGTERM");
+  });
+}
+
+// src/entries/is-entry.ts
+import { realpathSync } from "node:fs";
+function isEntry(main, argv1, self) {
+  if (main !== void 0) return main;
+  if (argv1 === void 0 || argv1 === "") return false;
+  try {
+    return realpathSync(argv1) === realpathSync(self);
+  } catch {
+    return false;
+  }
+}
+
+// src/entries/server-core.ts
+import { randomUUID } from "node:crypto";
+import { existsSync as existsSync23, realpathSync as realpathSync12, rmSync as rmSync9 } from "node:fs";
+import { dirname as dirname13, join as join23 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+
+// node_modules/@modelcontextprotocol/server/dist/index.mjs
+var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
+
+// src/core/contracts/agents.ts
+var AGENT_IDS = ["claude-code", "codex", "gemini", "qwen", "copilot-cli", "vscode", "kiro", "zcode", "pi", "opencode"];
 
 // src/core/contracts/errors.ts
 var ERROR_TEXT = Object.freeze({
@@ -29497,30 +29541,9 @@ function ownCallRow(project, ctx, name, reply4) {
   };
 }
 
-// src/core/lifecycle/exit.ts
-function installExitGuard(opts) {
-  if (opts.isTTY) return;
-  process.stdin.once("end", () => {
-    opts.onShutdown();
-    const sigtermTimer = setTimeout(() => {
-      console.error("context-mode: still running " + EXIT_SIGTERM_MS + " ms after SIGTERM");
-    }, EXIT_SIGTERM_MS);
-    const sigkillTimer = setTimeout(() => {
-      process.kill(process.pid, "SIGKILL");
-    }, EXIT_SIGKILL_MS);
-    sigtermTimer.unref();
-    sigkillTimer.unref();
-    process.once("exit", () => {
-      clearTimeout(sigtermTimer);
-      clearTimeout(sigkillTimer);
-    });
-    process.kill(process.pid, "SIGTERM");
-  });
-}
-
 // src/core/project/config-dir.ts
 import { basename, dirname, join, posix, resolve, win32 } from "node:path";
-var { existsSync: existsSync2, mkdirSync: mkdirSync2, readFileSync, readdirSync, realpathSync } = process.getBuiltinModule("node:fs");
+var { existsSync: existsSync2, mkdirSync: mkdirSync2, readFileSync, readdirSync, realpathSync: realpathSync2 } = process.getBuiltinModule("node:fs");
 function homeDirOf(env, platform = process.platform) {
   const set3 = (v) => v !== void 0 && v !== "";
   if (platform === "win32") {
@@ -29602,7 +29625,7 @@ function realOrSelf(path8) {
   const tail = [];
   for (let at = path8; ; ) {
     try {
-      return join(realpathSync.native(at), ...tail.reverse());
+      return join(realpathSync2.native(at), ...tail.reverse());
     } catch {
       const up = dirname(at);
       if (up === at) return path8;
@@ -29661,18 +29684,18 @@ function resolveConfigDir(env) {
   const set3 = env[DATA_DIR_ENV];
   const dir = dataRootOf(env, set3 !== void 0 && set3 !== "" ? "" : requireHomeDir(env));
   mkdirSync2(dir, { recursive: true });
-  return realpathSync.native(dir);
+  return realpathSync2.native(dir);
 }
 
 // src/core/project/resolve.ts
-import { basename as basename2, dirname as dirname3, join as join3, resolve as resolve3 } from "node:path";
+import { basename as basename2, dirname as dirname3, join as join3, resolve as resolve2 } from "node:path";
 
 // src/core/project/contain.ts
-import { dirname as dirname2, isAbsolute, join as join2, relative, resolve as resolve2, sep } from "node:path";
-var { lstatSync, realpathSync: realpathSync2 } = process.getBuiltinModule("node:fs");
+import { dirname as dirname2, join as join2, relative, sep } from "node:path";
+var { lstatSync, realpathSync: realpathSync3 } = process.getBuiltinModule("node:fs");
 function real(p) {
   try {
-    return realpathSync2.native(p);
+    return realpathSync3.native(p);
   } catch {
     return void 0;
   }
@@ -29837,7 +29860,7 @@ function sha256Hex(text) {
 }
 
 // src/core/project/resolve.ts
-var { existsSync: existsSync3, readFileSync: readFileSync2, realpathSync: realpathSync3, statSync } = process.getBuiltinModule("node:fs");
+var { existsSync: existsSync3, readFileSync: readFileSync2, realpathSync: realpathSync4, statSync } = process.getBuiltinModule("node:fs");
 function sourceOf(agent) {
   switch (agent) {
     case "claude-code":
@@ -29878,7 +29901,7 @@ function dirOf(kind, src) {
 function gitDirs(dir) {
   let cur;
   try {
-    cur = realpathSync3.native(dir);
+    cur = realpathSync4.native(dir);
   } catch {
     throw new CtxError("NO_GIT_DIR", { path: dir });
   }
@@ -29887,7 +29910,7 @@ function gitDirs(dir) {
     const gitDir = gitDirAt(join3(cur, GIT_DIR_NAME));
     if (gitDir !== null) {
       const common = firstLine(join3(gitDir, GIT_COMMONDIR_FILE));
-      return { commonDir: realpathSync3.native(common === null ? gitDir : resolve3(gitDir, common)), worktree: cur, start };
+      return { commonDir: realpathSync4.native(common === null ? gitDir : resolve2(gitDir, common)), worktree: cur, start };
     }
     const up = dirname3(cur);
     if (up === cur) return { commonDir: null, start };
@@ -29902,7 +29925,7 @@ function gitDirAt(dotGit) {
     } else {
       const line = firstLine(dotGit);
       if (line === null || !line.startsWith(GITDIR_FILE_PREFIX)) return null;
-      gitDir = resolve3(dirname3(dotGit), line.slice(GITDIR_FILE_PREFIX.length));
+      gitDir = resolve2(dirname3(dotGit), line.slice(GITDIR_FILE_PREFIX.length));
     }
   } catch {
     return null;
@@ -44316,10 +44339,10 @@ function startArgv(argv) {
   return sh === null ? null : [sh, ...argv];
 }
 function runProcess(argv, o) {
-  return new Promise((resolve10) => {
+  return new Promise((resolve7) => {
     const isWin2 = process.platform === "win32";
     const start = startArgv(argv);
-    if (start === null) return resolve10(NOT_STARTED);
+    if (start === null) return resolve7(NOT_STARTED);
     let child;
     try {
       child = spawn2(start[0], start.slice(1), {
@@ -44333,7 +44356,7 @@ function runProcess(argv, o) {
         windowsHide: true
       });
     } catch {
-      return resolve10(NOT_STARTED);
+      return resolve7(NOT_STARTED);
     }
     const stdoutChunks = [];
     const stderrChunks = [];
@@ -44367,7 +44390,7 @@ function runProcess(argv, o) {
       clearTimeout(drainTimer);
       clearTimeout(stopTimer);
       o.signal.removeEventListener("abort", onAbort);
-      resolve10({
+      resolve7({
         stdout: Buffer.concat(stdoutChunks),
         stderr: Buffer.concat(stderrChunks),
         exitCode,
@@ -44814,15 +44837,11 @@ function answer(db, input, scope, ctx, nm, ms, indexed, sort, pick4) {
 }
 async function handler(input, ctx) {
   const sort = input.sort ?? "relevance";
-  if (sort === "timeline" && (input.offset ?? 0) !== 0) {
+  if (sort === "timeline" && input.offset !== void 0) {
     return invalid("offset", 'drop offset; page a timeline with "after"');
   }
-  if (sort === "relevance" && (input.after ?? 0) !== 0) {
+  if (sort === "relevance" && input.after !== void 0) {
     return invalid("after", 'drop after, or pass sort:"timeline"');
-  }
-  if (input.source !== void 0 && input.source.trim() === "") {
-    const { source: _blank, ...rest } = input;
-    input = rest;
   }
   const scope = input.scope ?? "worktree";
   const db = await openDb(ctx.project, { readOnly: true });
@@ -45082,6 +45101,7 @@ import { basename as basename5, join as join17 } from "node:path";
 
 // src/adapters/claude-code.ts
 var TOOL_NAME_PREFIX = "mcp__plugin_context-mode_context-mode__";
+var USER_MCP_TOOL_NAME_PREFIX = "mcp__context-mode__";
 var SHELL_TOOL_NAMES = Object.freeze(["Bash", "PowerShell"]);
 var POWERSHELL_TOOL = "PowerShell";
 var SHELL_CANONICAL = "Bash";
@@ -45259,7 +45279,10 @@ function requireFields(raw) {
 }
 function decode3(raw) {
   requireFields(raw);
-  const ev = decodeClaudeShape(raw, "claude-code", TOOL_NAME_PREFIX, CLAUDE_SOURCES);
+  const p = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {};
+  const toolName2 = typeof p.tool_name === "string" ? p.tool_name : "";
+  const ownPrefix = toolName2.startsWith(USER_MCP_TOOL_NAME_PREFIX) ? USER_MCP_TOOL_NAME_PREFIX : TOOL_NAME_PREFIX;
+  const ev = decodeClaudeShape(raw, "claude-code", ownPrefix, CLAUDE_SOURCES);
   if (ev.tool !== void 0 && ev.tool.name === POWERSHELL_TOOL) ev.tool.canonicalName = SHELL_CANONICAL;
   if (ev.cwd === "") ev.cwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
   if (ev.event === "PostToolUse" && ev.tool !== void 0 && ev.tool.callId === void 0) {
@@ -45797,7 +45820,6 @@ function readResult6(p) {
   const text = p.content === void 0 ? "" : typeof p.content === "string" ? p.content : JSON.stringify(p.content);
   const info = { isError: p.isError === true, bytes: Buffer.byteLength(text), text };
   if (typeof p.exitCode === "number") info.exitCode = p.exitCode;
-  if (p.keep === true) info.keep = true;
   return info;
 }
 function decode11(raw) {
@@ -45874,11 +45896,6 @@ function decode12(raw) {
   const event = Object.prototype.hasOwnProperty.call(OPENCODE_EVENTS, native) ? OPENCODE_EVENTS[native] : void 0;
   if (event === void 0) throw new Error("opencode: unknown hook event " + String(p.type));
   const ev = { event, agent: "opencode", sessionId: String(p.sessionID ?? ""), cwd: String(p.directory ?? "") };
-  if (typeof p.agentID === "string" && p.agentID !== "") {
-    ev.agentId = p.agentID;
-    ev.agentType = p.agentID;
-  }
-  if (Array.isArray(p.agentTools)) ev.agentTools = p.agentTools.filter((t) => typeof t === "string");
   if (event === "UserPromptSubmit" && typeof p.message === "string") ev.prompt = p.message;
   if (event === "PreToolUse" || event === "PostToolUse") {
     const name = String(p.tool ?? "");
@@ -45899,7 +45916,7 @@ function encode12(ev, d, _extra) {
       if (ev.event !== "PreToolUse") return { stdout: "", exitCode: 0 };
       return { stdout: d.rewritten === void 0 ? d.reason : d.rewritten + "\n" + d.reason, exitCode: 2 };
     case "replace":
-      return { stdout: ev.event === "PostToolUse" ? d.output : "", exitCode: 0 };
+      return { stdout: "", exitCode: 0 };
   }
 }
 
@@ -46104,7 +46121,7 @@ var ADAPTERS = Object.freeze([
   }
 ]);
 var BY_ID = new Map(ADAPTERS.map((r) => [r.id, r]));
-var REPLACE_ROWS = /* @__PURE__ */ new Set(["claude-code", "gemini", "copilot-cli", "pi", "opencode"]);
+var REPLACE_ROWS = /* @__PURE__ */ new Set(["claude-code", "gemini", "copilot-cli", "pi"]);
 function hasReplace(row5) {
   return REPLACE_ROWS.has(row5.id);
 }
@@ -46136,7 +46153,7 @@ function ownBundleDir() {
 
 // src/core/ops/doctor-config.ts
 import { existsSync as existsSync10, readdirSync as readdirSync7, readFileSync as readFileSync9 } from "node:fs";
-import { dirname as dirname7, isAbsolute as isAbsolute3, join as join11, resolve as resolve4 } from "node:path";
+import { dirname as dirname7, join as join11 } from "node:path";
 
 // src/core/ops/host-text.ts
 var BOM_CODE = 65279;
@@ -48822,7 +48839,7 @@ function flatCommands(events, prefix) {
   return out;
 }
 var isV1Hook = (cmd) => cmd.includes(SERVER_KEY) && (V1_SCRIPT_NAMES.some((name) => cmd.includes(name)) || cmd.includes(V1_HOOK_COMMAND));
-var isCodexScript = (cmd) => V1_PATH_SEPS.some((sep3) => V1_CODEX_SCRIPT_NAMES.some((name) => cmd.includes(V1_CODEX_HOOKS_DIR.join(sep3) + sep3 + name)));
+var isCodexScript = (cmd) => cmd.includes(V1_SCRIPT_EXT) && V1_PATH_SEPS.some((sep3) => cmd.includes(V1_CODEX_HOOKS_DIR.join(sep3) + sep3));
 function dataDir(dir, reason, out) {
   if (existsSync7(dir)) out.push(finding(dir, "", reason));
 }
@@ -48870,7 +48887,8 @@ function scanCodex(agentHome, out) {
   const config4 = readTomlValue(tomlFile);
   for (const span2 of readTomlTables(tomlFile)) {
     if (span2.path[0] !== V1_TOML_SECTION_ROOT || span2.path[1] !== SERVER_KEY) continue;
-    if (isV2McpTable(hostConfigValueAt(config4, span2.path.slice(0, 2)))) continue;
+    if (span2.path.length === 2 && isV2McpTable(hostConfigValueAt(config4, span2.path))) continue;
+    if (span2.path.length === 3 && span2.path[2] === MCP_ENV_FIELD && isV2McpTable(hostConfigValueAt(config4, span2.path.slice(0, 2)))) continue;
     out.push(finding(tomlFile, span2.header.trim(), V1_REASON.codexToml));
   }
   dataDir(join9(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out);
@@ -49032,8 +49050,8 @@ function detectV1(agent, home, scope = {}) {
 }
 
 // src/core/ops/plugin-root.ts
-import { existsSync as existsSync8, readdirSync as readdirSync6, readFileSync as readFileSync7, realpathSync as realpathSync4 } from "node:fs";
-import { dirname as dirname6, isAbsolute as isAbsolute2, join as join10, sep as sep2 } from "node:path";
+import { existsSync as existsSync8, readdirSync as readdirSync6, readFileSync as readFileSync7, realpathSync as realpathSync5 } from "node:fs";
+import { dirname as dirname6, isAbsolute, join as join10, sep as sep2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 function missing(agent, path8) {
   return new CtxError("PLUGIN_ROOT_MISSING", { agent, path: path8 });
@@ -49067,7 +49085,7 @@ function recordedInstalls(text) {
 }
 var realOrNull = (path8) => {
   try {
-    return realpathSync4.native(path8);
+    return realpathSync5.native(path8);
   } catch {
     return null;
   }
@@ -49145,7 +49163,7 @@ function configEntryRoot(adapter, env) {
   const value = parseHostConfig(adapter.id, file2, current.text, current.format);
   const args = hostConfigValueAt(value, [...spec.key, MCP_ARGS_FIELD]);
   const script = Array.isArray(args) ? args[0] : void 0;
-  if (typeof script !== "string" || !isAbsolute2(script)) throw missing(adapter.id, file2);
+  if (typeof script !== "string" || !isAbsolute(script)) throw missing(adapter.id, file2);
   return dirname6(script);
 }
 function candidate(adapter, env, worktree) {
@@ -49167,14 +49185,14 @@ function candidate(adapter, env, worktree) {
 function resolvePluginRoot(adapter, env, worktree) {
   const path8 = candidate(adapter, env, worktree);
   try {
-    return realpathSync4.native(path8);
+    return realpathSync5.native(path8);
   } catch {
     throw missing(adapter.id, path8);
   }
 }
 
 // src/setup/pi-gate.ts
-import { existsSync as existsSync9, readFileSync as readFileSync8, realpathSync as realpathSync5 } from "node:fs";
+import { existsSync as existsSync9, readFileSync as readFileSync8, realpathSync as realpathSync6 } from "node:fs";
 import path4 from "node:path";
 var EXTENSIONS_KEY = "extensions";
 var PROJECT_DIR = ".pi";
@@ -49191,7 +49209,7 @@ function load(file2) {
 }
 var real2 = (p) => {
   try {
-    return realpathSync5(p);
+    return realpathSync6(p);
   } catch {
     return path4.resolve(p);
   }
@@ -49365,122 +49383,11 @@ function nativeMcpWrong(dir, row5) {
     return true;
   }
 }
-function opencodeEntrySpec(entry) {
-  return isObject4(entry) ? entry[OPENCODE_PACKAGE_FIELD] : Array.isArray(entry) ? entry[0] : entry;
-}
-function isNativeOpencodeEntry(entry, key) {
-  const spec = opencodeEntrySpec(entry);
-  if (typeof spec !== "string") return false;
-  return spec.startsWith(OPENCODE_NPM_SPEC_PREFIX) || key === OPENCODE_PLUGINS_KEY && spec === SERVER_KEY;
-}
 function isOwnOpencodeEntry(entry, key, own4) {
-  const spec = opencodeEntrySpec(entry);
+  const spec = isObject4(entry) ? entry[OPENCODE_PACKAGE_FIELD] : Array.isArray(entry) ? entry[0] : entry;
   if (typeof spec !== "string") return false;
-  return spec === OPENCODE_GIT_SPEC || own4.includes(spec) || isNativeOpencodeEntry(entry, key);
-}
-function stringLiterals(src) {
-  const out = [];
-  let i = 0;
-  while (i < src.length) {
-    const c = src[i];
-    if (c === "/" && src[i + 1] === "/") {
-      const n = src.indexOf("\n", i);
-      i = n < 0 ? src.length : n;
-      continue;
-    }
-    if (c === "/" && src[i + 1] === "*") {
-      const n = src.indexOf("*/", i + 2);
-      i = n < 0 ? src.length : n + 2;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      let j = i + 1;
-      let s = "";
-      while (j < src.length && src[j] !== c) {
-        if (src[j] === "\\") {
-          s += src[j + 1] ?? "";
-          j += 2;
-          continue;
-        }
-        s += src[j];
-        j++;
-      }
-      out.push(s);
-      i = j + 1;
-      continue;
-    }
-    i++;
-  }
-  return out;
-}
-var OPENCODE_PLUGINS_DIR = "plugins";
-var OPENCODE_PROJECT_DIR = ".opencode";
-var OPENCODE_PLUGIN_EXTS = [".js", ".mjs", ".ts"];
-var OPENCODE_PLUGIN_INDEX = "index";
-var OPENCODE_DIR_FILE_MAX = 64 * 1024;
-var OWN_PLUGIN_MODULES = [SERVER_KEY, `${SERVER_KEY}/server`];
-var FILE_URL_PREFIX = "file://";
-var NODE_MODULES_DIR = "node_modules";
-var PACKAGE_JSON_FILE = "package.json";
-var OPENCODE_PACKAGE_DIR_HINT = `${NODE_MODULES_DIR}/${SERVER_KEY}`;
-function opencodePluginDirs(configDir, worktree) {
-  return [configDir, opencodeProjectDir(worktree)];
-}
-function opencodeProjectDir(worktree) {
-  return join11(worktree, OPENCODE_PROJECT_DIR);
-}
-function packageResolves(fromDir) {
-  for (let d = fromDir; ; d = dirname7(d)) {
-    if (existsSync10(join11(d, NODE_MODULES_DIR, SERVER_KEY, PACKAGE_JSON_FILE))) return true;
-    if (dirname7(d) === d) return false;
-  }
-}
-function opencodeDirPlugins(dirs) {
-  const bundle = opencodePluginFile();
-  const ownFile = join11(bundle, ...OPENCODE_PLUGIN_PATH).split("\\").join("/");
-  const isModule = (p) => OWN_PLUGIN_MODULES.includes(p);
-  const isPath = (p) => {
-    if (p === ownFile || p === `${FILE_URL_PREFIX}${ownFile}`) return true;
-    const seg = p.split("/");
-    const n = seg.length;
-    return n >= 3 && seg[n - 1] === "plugin.js" && seg[n - 2] === "opencode" && seg[n - 3] === SERVER_KEY;
-  };
-  const out = [];
-  for (const dir of dirs) {
-    const pdir = join11(dir, OPENCODE_PLUGINS_DIR);
-    let names;
-    try {
-      names = readdirSync7(pdir);
-    } catch {
-      continue;
-    }
-    for (const name of names) {
-      const loose = OPENCODE_PLUGIN_EXTS.some((x) => name.endsWith(x)) ? [join11(pdir, name)] : [];
-      const files = [...loose, ...OPENCODE_PLUGIN_EXTS.map((x) => join11(pdir, name, `${OPENCODE_PLUGIN_INDEX}${x}`))];
-      for (const f of files) {
-        let text;
-        try {
-          const b = readFileSync9(f);
-          if (b.length > OPENCODE_DIR_FILE_MAX) continue;
-          text = b.toString("utf8");
-        } catch {
-          continue;
-        }
-        const lits = stringLiterals(text).map((s) => s.split("\\").join("/")).filter((p) => isModule(p) || isPath(p));
-        if (!lits.length) continue;
-        const loads = lits.some((p) => {
-          if (isModule(p)) return packageResolves(dirname7(f));
-          const bare2 = p.startsWith(FILE_URL_PREFIX) ? p.slice(FILE_URL_PREFIX.length) : p;
-          return existsSync10(isAbsolute3(bare2) ? bare2 : resolve4(dirname7(f), bare2));
-        });
-        out.push({ file: f, loads });
-      }
-    }
-  }
-  return out;
-}
-function opencodeDirPlugin(dirs) {
-  return opencodeDirPlugins(dirs).find((p) => p.loads)?.file;
+  if (spec === OPENCODE_GIT_SPEC || spec.startsWith(OPENCODE_NPM_SPEC_PREFIX) || own4.includes(spec)) return true;
+  return key === OPENCODE_PLUGINS_KEY && spec === SERVER_KEY;
 }
 function opencodeMcpOwn(entry) {
   if (!isObject4(entry)) return false;
@@ -49501,8 +49408,7 @@ function opencodeValueListed(value) {
 }
 function opencodeListed(file2, worktree) {
   const dirs = [dirname7(file2), worktree];
-  if (dirs.some((dir) => OPENCODE_CONFIG_FILES.some((name) => opencodeValueListed(opencodeFileValue(join11(dir, name)))))) return true;
-  return opencodeDirPlugin(opencodePluginDirs(dirname7(file2), worktree)) !== void 0;
+  return dirs.some((dir) => OPENCODE_CONFIG_FILES.some((name) => opencodeValueListed(opencodeFileValue(join11(dir, name)))));
 }
 function mcpWrong(row5, home, env, worktree) {
   const native = row5.id === "codex" ? codexNativeDir(env, home) : null;
@@ -49724,8 +49630,30 @@ async function checkIndex(project) {
 }
 
 // src/core/ops/doctor-env.ts
-import { existsSync as existsSync12, readFileSync as readFileSync10, realpathSync as realpathSync6 } from "node:fs";
-import { isAbsolute as isAbsolute4, join as join12, relative as relative2 } from "node:path";
+import { existsSync as existsSync12, readFileSync as readFileSync10, realpathSync as realpathSync7 } from "node:fs";
+import { isAbsolute as isAbsolute2, join as join12, relative as relative2 } from "node:path";
+
+// src/core/ops/daemon-state.ts
+var selfPort;
+function daemonSelfPort() {
+  return selfPort;
+}
+function daemonConfiguredPort(env) {
+  const raw = env[DAEMON_PORT_ENV];
+  if (raw !== void 0 && /^[0-9]+$/.test(raw)) {
+    const port = Number(raw);
+    if (port >= 1 && port <= 65535) return port;
+  }
+  return DAEMON_DEFAULT_PORT;
+}
+function daemonCheckWanted(env) {
+  const raw = env[DAEMON_PORT_ENV];
+  if (raw === void 0 || !/^[0-9]+$/.test(raw)) return false;
+  const port = Number(raw);
+  return port >= 1 && port <= 65535;
+}
+
+// src/core/ops/doctor-env.ts
 function pass3(id, detail = DOCTOR_PASS_DETAIL) {
   return { id, label: DOCTOR_LABEL[id], status: "PASS", detail };
 }
@@ -49893,8 +49821,8 @@ function checkMcp(ctx, adapter) {
 }
 function piCwdInside(worktree, piCwd) {
   if (piCwd === void 0 || !existsSync12(piCwd)) return false;
-  const rel = relative2(worktree, realpathSync6.native(piCwd));
-  return rel === "" || !rel.startsWith("..") && !isAbsolute4(rel);
+  const rel = relative2(worktree, realpathSync7.native(piCwd));
+  return rel === "" || !rel.startsWith("..") && !isAbsolute2(rel);
 }
 function checkProject(i) {
   const bad = fail3("D7", D7_DETAIL(i.project.source), D7_FIX);
@@ -49913,9 +49841,23 @@ function checkShell(env) {
   if (shell !== null) return pass3("D11", D11_PASS_DETAIL(shell, win));
   return win ? fail3("D11", D11_WIN_DETAIL, D11_WIN_FIX) : fail3("D11", D11_POSIX_DETAIL, D11_POSIX_FIX);
 }
+async function checkDaemon(env) {
+  const self = daemonSelfPort();
+  if (self === void 0 && !daemonCheckWanted(env)) return void 0;
+  const port = self ?? daemonConfiguredPort(env);
+  const row5 = (status, detail, fixCommand) => fixCommand === void 0 ? { id: "D12", label: DAEMON_CHECK_LABEL, status, detail } : { id: "D12", label: DAEMON_CHECK_LABEL, status, detail, fixCommand };
+  try {
+    const r = await fetch(`http://${DAEMON_HOST}:${port}${DAEMON_HEALTH_PATH}`, { signal: AbortSignal.timeout(DAEMON_PROBE_TIMEOUT_MS), redirect: "manual" });
+    const prefix = self === void 0 ? "" : DAEMON_CHECK_SELF_DETAIL + "; ";
+    if (r.status === 204) return row5("PASS", `${prefix}${DAEMON_CHECK_PASS_DETAIL} at ${daemonUrlOf(port)}`);
+    return row5("FAIL", `${daemonUrlOf(port)} answered HTTP ${r.status}, not the daemon's 204`, DAEMON_CHECK_FIX);
+  } catch {
+    return row5("FAIL", `${DAEMON_CHECK_DOWN_DETAIL} ${daemonUrlOf(port)}`, DAEMON_CHECK_FIX);
+  }
+}
 
 // src/core/ops/doctor-hook.ts
-import { existsSync as existsSync14, mkdirSync as mkdirSync5, mkdtempSync, readFileSync as readFileSync11, realpathSync as realpathSync8, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { existsSync as existsSync14, mkdirSync as mkdirSync5, mkdtempSync, readFileSync as readFileSync11, realpathSync as realpathSync9, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import path7 from "node:path";
 
@@ -51678,7 +51620,7 @@ function hasType(v, t) {
 function same(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
-function resolve5(root, ref) {
+function resolve3(root, ref) {
   const parts = ref.split("/");
   if (parts[0] !== "#") throw new Error(`hook-shape: only local $ref is read, got ${ref}`);
   let at = root;
@@ -51691,7 +51633,7 @@ function shapeErrors(schema, value, root = schema, at = "$") {
     if (!NOTE_KEYS.has(k) && !RULE_KEYS.has(k)) throw new Error(`hook-shape: keyword ${k} at ${at} is not read by the checker`);
   }
   const errs = [];
-  if (typeof schema.$ref === "string") errs.push(...shapeErrors(resolve5(root, schema.$ref), value, root, at));
+  if (typeof schema.$ref === "string") errs.push(...shapeErrors(resolve3(root, schema.$ref), value, root, at));
   if (Array.isArray(schema.allOf)) for (const s of schema.allOf) errs.push(...shapeErrors(s, value, root, at));
   if (schema.type !== void 0) {
     const types = Array.isArray(schema.type) ? schema.type : [schema.type];
@@ -51741,7 +51683,7 @@ function nodeLaunch(env, host = { bun: process.versions.bun, execPath: process.e
 
 // src/setup/codex-trust.ts
 import { createHash } from "node:crypto";
-import { existsSync as existsSync13, realpathSync as realpathSync7 } from "node:fs";
+import { existsSync as existsSync13, realpathSync as realpathSync8 } from "node:fs";
 import path6 from "node:path";
 import { spawn as spawn3, spawnSync as spawnSync2 } from "node:child_process";
 
@@ -51858,14 +51800,14 @@ function pluginHooksFromReply(m, pluginId) {
 function askPluginHooks(env, pluginId, cwd) {
   const bin = whichBin("codex", env);
   if (!bin) return Promise.resolve({ kind: "absent" });
-  return new Promise((resolve10) => {
+  return new Promise((resolve7) => {
     let asked;
     const done_ = (hooks) => hooks === void 0 ? { kind: "silent" } : { kind: "list", hooks, codexHome: asked };
     let f;
     try {
       f = spawnForm(bin, ["app-server"], env);
     } catch {
-      resolve10({ kind: "silent" });
+      resolve7({ kind: "silent" });
       return;
     }
     const child = spawn3(f.command, f.args, { env, cwd, stdio: ["pipe", "pipe", "ignore"], windowsVerbatimArguments: f.windowsVerbatimArguments, windowsHide: true });
@@ -51875,7 +51817,7 @@ function askPluginHooks(env, pluginId, cwd) {
     let result;
     const settle3 = () => {
       clearTimeout(grace);
-      resolve10(done_(result));
+      resolve7(done_(result));
     };
     let grace;
     const finish2 = (v) => {
@@ -52135,7 +52077,7 @@ function codexHookJournaled(db) {
 }
 function realDir(p) {
   try {
-    return realpathSync8(p);
+    return realpathSync9(p);
   } catch {
     return p;
   }
@@ -52234,14 +52176,14 @@ async function checkHookRoundTrip(i) {
 }
 
 // src/core/hooks/fallback.ts
-import { join as join14, resolve as resolve7 } from "node:path";
+import { join as join14, resolve as resolve4 } from "node:path";
 
 // src/core/policy/read-media.ts
 import { extname } from "node:path";
 var { closeSync, openSync, readSync } = process.getBuiltinModule("node:fs");
 
 // src/core/policy/own-file.ts
-import { extname as extname2, join as join13, resolve as resolve6 } from "node:path";
+import { extname as extname2, join as join13 } from "node:path";
 
 // src/core/hooks/fallback.ts
 var fs = process.getBuiltinModule("node:fs");
@@ -52455,7 +52397,7 @@ function unsupportedHostOf(sig) {
 
 // src/core/ops/doctor-issue.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
-import { closeSync as closeSync2, existsSync as existsSync16, fstatSync, mkdirSync as mkdirSync7, openSync as openSync2, readFileSync as readFileSync12, readSync as readSync2, realpathSync as realpathSync9, writeFileSync as writeFileSync4 } from "node:fs";
+import { closeSync as closeSync2, existsSync as existsSync16, fstatSync, mkdirSync as mkdirSync7, openSync as openSync2, readFileSync as readFileSync12, readSync as readSync2, realpathSync as realpathSync10, writeFileSync as writeFileSync4 } from "node:fs";
 import { delimiter, join as join16 } from "node:path";
 var TOKEN_PREFIXES = ["ghp_", "gho_", "github_pat_", "sk-", "xoxb-", "AKIA"];
 function tildeOf(env) {
@@ -52463,7 +52405,7 @@ function tildeOf(env) {
   if (home === null || home === "") return (t) => t;
   const homes = [home];
   try {
-    const real3 = realpathSync9.native(home);
+    const real3 = realpathSync10.native(home);
     if (real3 !== home) homes.push(real3);
   } catch {
   }
@@ -52751,6 +52693,13 @@ async function runDoctorChecks(ctx, adapter, host0) {
   };
   const rows = [];
   for (const id of DOCTOR_CHECK_ORDER) rows.push(await guard(id, checks[id]));
+  let daemonRow;
+  try {
+    daemonRow = await checkDaemon(env);
+  } catch (err) {
+    daemonRow = { id: "D12", label: DAEMON_CHECK_LABEL, status: "UNKNOWN", detail: lineOf(err) };
+  }
+  if (daemonRow !== void 0) rows.push(daemonRow);
   const at = DOCTOR_CHECK_ORDER.indexOf("D8");
   if (orphan.length > 0) {
     const files = orphan;
@@ -52817,7 +52766,7 @@ var ctxDoctor = Object.freeze({
 // src/core/tools/execute.ts
 import { existsSync as existsSync18, mkdtempSync as mkdtempSync2, rmSync as rmSync6, writeFileSync as writeFileSync5 } from "node:fs";
 import { tmpdir as tmpdir3 } from "node:os";
-import { dirname as dirname10, join as join18, parse as parse5, resolve as resolve8 } from "node:path";
+import { dirname as dirname10, join as join18, parse as parse5, resolve as resolve5 } from "node:path";
 
 // src/core/index/select.ts
 var READ_CHUNKS = "SELECT ord, body FROM chunks WHERE source_id = ?";
@@ -53003,7 +52952,7 @@ async function handler3(raw, ctx) {
   const cwd = ctx.project.worktree;
   const extra = { ...PLAIN_OUTPUT_ENV2 };
   if (input.file !== void 0) {
-    const abs = resolve8(cwd, input.file);
+    const abs = resolve5(cwd, input.file);
     const bad = fileError(input.file, abs, ctx.project.containmentRoot);
     if (bad !== null) return fail4(bad);
     extra.CTX_FILE = abs;
@@ -53058,15 +53007,15 @@ var ctxExecute = {
 
 // src/core/tools/index.ts
 import { existsSync as existsSync19, readFileSync as readFileSync15, statSync as statSync7 } from "node:fs";
-import { dirname as dirname11, extname as extname3, join as join20, relative as relative3, resolve as resolve9 } from "node:path";
+import { dirname as dirname11, extname as extname3, join as join20, relative as relative3, resolve as resolve6 } from "node:path";
 
 // src/core/index/walk.ts
-import { readdirSync as readdirSync9, readFileSync as readFileSync14, realpathSync as realpathSync10, statSync as statSync6 } from "node:fs";
+import { readdirSync as readdirSync9, readFileSync as readFileSync14, realpathSync as realpathSync11, statSync as statSync6 } from "node:fs";
 import { join as join19 } from "node:path";
 var GITIGNORE = ".gitignore";
 var GIT_DIR = ".git";
 function walkDir(root, containmentRoot) {
-  const real3 = realpathSync10(root);
+  const real3 = realpathSync11(root);
   if (!isInside(containmentRoot, real3)) throw new CtxError("OUTSIDE_ROOT", { p: root, root: containmentRoot });
   const found = [];
   visit(real3, [], [], containmentRoot, /* @__PURE__ */ new Set([real3]), found);
@@ -53090,7 +53039,7 @@ function visit(abs, rel, parent, contain, seen, found) {
     if (e.isSymbolicLink()) {
       let resolved;
       try {
-        resolved = realpathSync10(path8);
+        resolved = realpathSync11(path8);
       } catch {
         continue;
       }
@@ -53105,7 +53054,7 @@ function visit(abs, rel, parent, contain, seen, found) {
     if (isFile) {
       found.push({ dir: rel, name: e.name, absPath: path8 });
     } else if (isDir) {
-      const key = e.isSymbolicLink() ? target : realpathSync10(path8);
+      const key = e.isSymbolicLink() ? target : realpathSync11(path8);
       if (seen.has(key)) continue;
       seen.add(key);
       visit(path8, segs, rules, contain, seen, found);
@@ -53345,18 +53294,18 @@ function request(u, conn, proxy, signal) {
   const host = bare(u.hostname);
   const port = u.port === "" ? defaultPort(u.protocol) : Number(u.port);
   const path8 = u.pathname + u.search;
-  return new Promise((resolve10, reject) => {
+  return new Promise((resolve7, reject) => {
     const onErr = (err) => reject(fail5(causeCode(err)));
     if (proxy === void 0) {
       const mod = u.protocol === "https:" ? https : http;
       const req = mod.request({ host: conn.address, port, path: path8, signal, servername: tlsName(host), headers: { host: u.host } });
-      req.on("response", resolve10).on("error", onErr).end();
+      req.on("response", resolve7).on("error", onErr).end();
       return;
     }
     const proxyHeaders = proxy.auth === void 0 ? {} : { "proxy-authorization": proxy.auth };
     if (u.protocol === "http:") {
       const req = http.request({ host: conn.address, port: conn.port, path: u.href, signal, headers: { host: u.host, ...proxyHeaders } });
-      req.on("response", resolve10).on("error", onErr).end();
+      req.on("response", resolve7).on("error", onErr).end();
       return;
     }
     const authority = (isIP(host) === 6 ? "[" + host + "]" : host) + ":" + port;
@@ -53376,16 +53325,16 @@ function request(u, conn, proxy, signal) {
         headers: { host: u.host },
         createConnection: () => tlsConnect({ socket, host, servername: tlsName(host) })
       });
-      req.on("response", resolve10).on("error", onErr).end();
+      req.on("response", resolve7).on("error", onErr).end();
     });
     tunnel.end();
   });
 }
 function readBody(res) {
-  return new Promise((resolve10, reject) => {
+  return new Promise((resolve7, reject) => {
     const parts = [];
     res.on("data", (b) => parts.push(b));
-    res.on("end", () => resolve10(Buffer.concat(parts)));
+    res.on("end", () => resolve7(Buffer.concat(parts)));
     res.on("error", (err) => reject(fail5(causeCode(err))));
     res.on("aborted", () => reject(fail5("ECONNRESET")));
   });
@@ -57263,7 +57212,7 @@ function missingOrOutside(given, abs, root) {
   return new CtxError("OUTSIDE_ROOT", { p: given, root });
 }
 function pathItems(input, project) {
-  const abs = resolve9(project.worktree, input.path);
+  const abs = resolve6(project.worktree, input.path);
   if (!isInside(project.containmentRoot, abs)) throw missingOrOutside(input.path, abs, project.containmentRoot);
   const base = relative3(project.worktree, abs);
   if (statSync7(abs).isDirectory()) {
@@ -57695,8 +57644,7 @@ function reply3(text, isError) {
   return { text, isError, sandboxBytes: 0 };
 }
 async function handler6(input, ctx) {
-  const given = input.session !== void 0 && input.session.trim() !== "" ? input.session : void 0;
-  const sessionId = given ?? ctx.sessionId;
+  const sessionId = input.session ?? ctx.sessionId;
   if (sessionId === "") return reply3(RESUME_NO_SESSION_LINE, true);
   const db = await openDb(ctx.project, { readOnly: true });
   try {
@@ -58528,19 +58476,7 @@ function checkCall(tool, input) {
   return parsed.success ? { ok: true, data: parsed.data } : { ok: false, line: invalidCallLine(tool, parsed.error.issues) };
 }
 
-// src/entries/is-entry.ts
-import { realpathSync as realpathSync11 } from "node:fs";
-function isEntry(main, argv1, self) {
-  if (main !== void 0) return main;
-  if (argv1 === void 0 || argv1 === "") return false;
-  try {
-    return realpathSync11(argv1) === realpathSync11(self);
-  } catch {
-    return false;
-  }
-}
-
-// src/entries/server.ts
+// src/entries/server-core.ts
 function resolveAgent(argv, env) {
   let afterFlag = false;
   for (const arg of argv) {
@@ -58587,21 +58523,21 @@ function metaNumber(meta3, key) {
   const v = meta3?.[key];
   return typeof v === "number" && Number.isSafeInteger(v) ? v : void 0;
 }
-function sessionIdOf(meta3, agent, env, serverId) {
+function sessionIdOf(meta3, agent, env, fallbackId) {
   const fromMeta = metaString(meta3, "sessionId");
   if (fromMeta !== void 0) return fromMeta;
   const key = agent === void 0 ? void 0 : HOST_SESSION_ENV[agent];
   const fromHost = key === void 0 ? void 0 : env[key];
   if (typeof fromHost === "string" && fromHost !== "") return fromHost;
-  return RUN_SESSION_PREFIX + serverId;
+  return fallbackId;
 }
 var CODEX_SANDBOX_STATE_META = "codex/sandbox-state-meta";
-var FILE_URL_PREFIX2 = "file:";
+var FILE_URL_PREFIX = "file:";
 function workspaceFromMeta(meta3) {
   const state = meta3?.[CODEX_SANDBOX_STATE_META];
   const cwd = typeof state === "object" && state !== null ? state.sandboxCwd : void 0;
   if (typeof cwd !== "string" || cwd === "") return void 0;
-  if (!cwd.startsWith(FILE_URL_PREFIX2)) return cwd;
+  if (!cwd.startsWith(FILE_URL_PREFIX)) return cwd;
   try {
     return fileURLToPath3(cwd);
   } catch {
@@ -58625,7 +58561,7 @@ async function workspaceFromRoots(server) {
   try {
     const { roots } = await server.server.listRoots(void 0, { timeout: ROOTS_TIMEOUT_MS });
     for (const root of roots) {
-      if (root.uri.startsWith(FILE_URL_PREFIX2)) return fileURLToPath3(root.uri);
+      if (root.uri.startsWith(FILE_URL_PREFIX)) return fileURLToPath3(root.uri);
     }
   } catch (err) {
     console.error("context-mode: roots/list: " + (err instanceof Error ? err.message : String(err)));
@@ -58643,26 +58579,44 @@ function errorReply(err) {
   console.error(err);
   return { text: INTERNAL_ERROR_LINE, isError: true, sandboxBytes: 0 };
 }
-async function startServer(argv, env) {
+function stdioRouting(argv, env, serverId) {
+  return {
+    agentOf: (_server, _meta) => resolveAgent(argv, env),
+    cwdOf: async (meta3, _req, server, agent) => {
+      const fromRoots = agent === "vscode" && !hasWorkspaceFolder(argv) ? await workspaceFromRoots(server) : void 0;
+      const callArgv = fromRoots === void 0 ? argv : [...argv, WORKSPACE_FOLDER_FLAG, fromRoots];
+      return { cwd: workspaceCwdOf(meta3, process.cwd(), process.argv[1]), argv: callArgv };
+    },
+    envOf: () => env,
+    fallbackIdOf: () => RUN_SESSION_PREFIX + serverId
+    // process-local id (§4 step 5, 00 A8)
+  };
+}
+async function createServerCore(argv, env) {
   const serverId = randomUUID();
   const degraded = await isDegraded();
   const tools = degraded ? TOOLS2.filter((t) => t.name === "ctx_doctor") : TOOLS2;
   const pending = /* @__PURE__ */ new Map();
   const held = [];
-  let cleaned = false;
+  const cleaned = /* @__PURE__ */ new Set();
+  let swept = false;
   async function openOwn(project) {
     const db = await openDb(project);
     const configDir = resolveConfigDir(process.env);
     try {
-      if (!cleaned) cleanupProject(db, configDir);
+      const dbPath = project.projectKey;
+      if (!cleaned.has(dbPath)) {
+        cleaned.add(dbPath);
+        cleanupProject(db, configDir);
+      }
       writeOwnerPid(configDir, project.projectKey, serverId);
     } catch (err) {
       closeDb(db);
       throw err;
     }
     held.push(db);
-    if (!cleaned) {
-      cleaned = true;
+    if (!swept) {
+      swept = true;
       sweepDeadProjects(configDir);
     }
     return db;
@@ -58689,62 +58643,89 @@ async function startServer(argv, env) {
     const db = await ownDb(project);
     appendEvent(db, ownCallRow(project, ctx, name, reply4));
   }
-  function dispatch(server, tool) {
+  let activeCalls = 0;
+  let idleWaiters = [];
+  const callStarted = () => {
+    activeCalls++;
+  };
+  const callEnded = () => {
+    activeCalls--;
+    if (activeCalls === 0) {
+      const wake = idleWaiters;
+      idleWaiters = [];
+      for (const w of wake) w();
+    }
+  };
+  const inFlight = () => activeCalls;
+  const drain = async () => {
+    if (activeCalls === 0) return;
+    await new Promise((resolve7) => {
+      idleWaiters.push(resolve7);
+    });
+  };
+  function dispatch(server, tool, routing) {
     return async (input, req) => {
-      const meta3 = req.mcpReq._meta;
-      const agent = resolveAgent(argv, env);
-      const fromRoots = agent === "vscode" && !hasWorkspaceFolder(argv) ? await workspaceFromRoots(server) : void 0;
-      const callArgv = fromRoots === void 0 ? argv : [...argv, WORKSPACE_FOLDER_FLAG, fromRoots];
-      let project;
-      const projectOf = () => {
-        if (agent === void 0) throw new CtxError("NO_PROJECT", { kind: "--agent" });
-        project ??= resolveProject(agent, { env, argv: callArgv, cwd: workspaceCwdOf(meta3, process.cwd(), process.argv[1]), piCwd: void 0 });
-        return project;
-      };
-      const ctx = {
-        get project() {
-          return projectOf();
-        },
-        sessionId: sessionIdOf(meta3, agent, env, serverId),
-        turn: metaNumber(meta3, "turn") ?? 0,
-        signal: req.mcpReq.signal,
-        clientInfo: server.server.getClientVersion(),
-        protocolVersion: server.server.getNegotiatedProtocolVersion() ?? ""
-      };
-      let reply4;
-      const checked = checkCall(tool, input);
-      if (!checked.ok) {
-        reply4 = { text: checked.line, isError: true, sandboxBytes: 0 };
-      } else {
-        try {
-          reply4 = await tool.handler(checked.data, ctx);
-        } catch (err) {
-          reply4 = errorReply(err);
-        }
+      callStarted();
+      try {
+        return await dispatchInner(server, tool, routing, input, req);
+      } finally {
+        callEnded();
       }
-      if (stopRequested()) {
-        setTimeout(stopSelf, UPGRADE_STOP_DELAY_MS);
-        return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
-      }
-      if (!degraded) {
-        let resolved;
-        try {
-          resolved = projectOf();
-        } catch (err) {
-          console.error("context-mode: no journal row: " + (err instanceof Error ? err.message : String(err)));
-        }
-        if (resolved !== void 0) {
-          try {
-            await journal(resolved, ctx, tool.name, reply4);
-          } catch (err) {
-            reply4 = tool.name === DOCTOR_TOOL_NAME ? { ...reply4, text: reply4.text + "\n" + JOURNAL_SKIPPED_LINE(errorReply(err).text) } : errorReply(err);
-          }
-        }
-      }
-      return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
     };
   }
-  function createServer() {
+  async function dispatchInner(server, tool, routing, input, req) {
+    const meta3 = req.mcpReq._meta;
+    const agent = routing.agentOf(server, meta3, req);
+    const { cwd, argv: callArgv } = await routing.cwdOf(meta3, req, server, agent);
+    let project;
+    const projectOf = () => {
+      if (agent === void 0) throw new CtxError("NO_PROJECT", { kind: "--agent" });
+      project ??= resolveProject(agent, { env: routing.envOf(), argv: callArgv, cwd, piCwd: void 0 });
+      return project;
+    };
+    const ctx = {
+      get project() {
+        return projectOf();
+      },
+      sessionId: sessionIdOf(meta3, agent, routing.envOf(), routing.fallbackIdOf(req)),
+      turn: metaNumber(meta3, "turn") ?? 0,
+      signal: req.mcpReq.signal,
+      clientInfo: server.server.getClientVersion(),
+      protocolVersion: server.server.getNegotiatedProtocolVersion() ?? ""
+    };
+    let reply4;
+    const checked = checkCall(tool, input);
+    if (!checked.ok) {
+      reply4 = { text: checked.line, isError: true, sandboxBytes: 0 };
+    } else {
+      try {
+        reply4 = await tool.handler(checked.data, ctx);
+      } catch (err) {
+        reply4 = errorReply(err);
+      }
+    }
+    if (stopRequested()) {
+      setTimeout(stopSelf, UPGRADE_STOP_DELAY_MS);
+      return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
+    }
+    if (!degraded) {
+      let resolved;
+      try {
+        resolved = projectOf();
+      } catch (err) {
+        console.error("context-mode: no journal row: " + (err instanceof Error ? err.message : String(err)));
+      }
+      if (resolved !== void 0) {
+        try {
+          await journal(resolved, ctx, tool.name, reply4);
+        } catch (err) {
+          reply4 = tool.name === "ctx_doctor" ? { ...reply4, text: reply4.text + "\n" + JOURNAL_SKIPPED_LINE(errorReply(err).text) } : errorReply(err);
+        }
+      }
+    }
+    return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
+  }
+  function createMcpServer(routing) {
     const server = new McpServer(
       { name: SERVER_KEY, version: "dev" },
       // DEVIATIONS: no version constant in contracts yet
@@ -58767,12 +58748,11 @@ async function startServer(argv, env) {
           ...tool.readOnly ? { annotations: { readOnlyHint: true } } : {},
           ...tool.alwaysLoad ? { _meta: { "anthropic/alwaysLoad": true } } : {}
         },
-        dispatch(server, tool)
+        dispatch(server, tool, routing)
       );
     }
     return server;
   }
-  let handle;
   function shutdown() {
     for (const db of held) {
       try {
@@ -58784,25 +58764,39 @@ async function startServer(argv, env) {
       }
       closeDb(db);
     }
-    handle?.close().catch((err) => console.error(err));
   }
   function stopSelf() {
     shutdown();
     process.kill(process.pid, "SIGTERM");
   }
-  installExitGuard({ onShutdown: shutdown, isTTY: process.stdin.isTTY === true });
-  handle = serveStdio(createServer);
-  await new Promise((resolve10) => process.once("exit", () => resolve10()));
+  return { serverId, degraded, drain, inFlight, shutdown, stopSelf, createMcpServer };
 }
-if (isEntry(import.meta.main, process.argv[1], fileURLToPath3(import.meta.url))) {
+
+// src/entries/server.ts
+async function startServer(argv, env) {
+  const core = await createServerCore(argv, env);
+  const routing = stdioRouting(argv, env, core.serverId);
+  let handle;
+  installExitGuard({ onShutdown: core.shutdown, isTTY: process.stdin.isTTY === true });
+  handle = serveStdio(() => core.createMcpServer(routing));
+  await new Promise((resolve7) => process.once("exit", () => resolve7()));
+}
+if (isEntry(import.meta.main, process.argv[1], fileURLToPath4(import.meta.url))) {
   const [, , ...cliArgs] = process.argv;
   await startServer(cliArgs, process.env);
 }
 export {
   INSTRUCTIONS,
+  errorReply,
+  hasWorkspaceFolder,
+  isDegraded,
+  metaNumber,
+  resolveAgent,
   sessionIdOf,
   startServer,
-  workspaceCwdOf
+  workspaceCwdOf,
+  workspaceFromMeta,
+  workspaceFromRoots
 };
 /*! Bundled license information:
 

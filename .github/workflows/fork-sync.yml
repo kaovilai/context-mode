@@ -1,0 +1,132 @@
+# fork-sync (FORK ONLY): keep fork main carrying the latest upstream main.
+# Once a day (and by hand): adopt a validated reconcile pull request if one is waiting, then
+# rebase origin/main onto mksglu/context-mode's main and force-push the result, so the fork's
+# own commits stay replayed on top of fresh upstream work.
+#
+# Adoption (a reconcile pull request labeled fork-sync, opened by the agentic workflow
+# .github/workflows/fork-sync-reconcile.md): the run validates the pull request's head tree
+# itself — npm install, the generated prompt file, the whole unit suite — because a pull
+# request pushed with GITHUB_TOKEN gets no CI of its own. A validated tree is adopted as ONE
+# commit on top of upstream/main (git commit-tree), never merged: squash-merging would keep
+# the original conflicting fork commits in main's history and the next rebase would hit the
+# same conflict again. After adoption main is upstream/main + one reconciled fork commit, and
+# every later daily rebase replays that single commit.
+#
+# A conflicting rebase is never forced: the run collects the conflicted files and opens (or
+# updates) one open issue labeled `fork-sync`. The reconciler runs hourly and on that label,
+# so the issue is picked up without any event from this workflow's own token.
+#
+# Credentials: set the FORK_SYNC_TOKEN secret (a PAT with repo + workflow) to get full
+# behavior. GITHUB_TOKEN alone cannot push updates to files under .github/workflows/ (an
+# upstream rebase touches those regularly) and its pushes start no CI on main; with the
+# secret, pushes carry it and issue creation triggers the reconciler immediately.
+name: fork-sync
+on:
+  schedule: [{ cron: "23 4 * * *" }]
+  workflow_dispatch: {}
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+env:
+  SYNC_TOKEN: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: remotes and credentials
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/mksglu/context-mode.git
+          # push and gh with the sync token: GITHUB_TOKEN cannot update workflow files
+          # and its events start no further workflows
+          git remote set-url origin "https://x-access-token:${SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+      - name: adopt a validated reconcile pull request, if one is waiting
+        env:
+          GH_TOKEN: ${{ env.SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          git fetch upstream main
+          git fetch origin main
+          UP=$(git rev-parse upstream/main)
+          for n in $(gh pr list --label fork-sync --state open --json number --jq '.[].number'); do
+            echo "== pull request #$n"
+            # any check that did post must be green (GITHUB_TOKEN-authored pull requests post none)
+            if ! gh pr checks "$n" > /dev/null 2>&1; then
+              echo "#$n posted no checks; the head-tree validation below is the gate"
+            else
+              if gh pr checks "$n" --json state --jq 'any(.[]; .state != "SUCCESS" and .state != "SKIPPED")' | grep -q true; then
+                echo "#$n has non-passing checks; leaving it open for the reconciler"
+                continue
+              fi
+            fi
+            # validate the head tree ourselves: this pull request carried no CI of its own
+            git fetch origin "pull/$n/head"
+            T=$(git rev-parse FETCH_HEAD)
+            git checkout -B "validate-$n" "$T"
+            npm install
+            node build/build.mjs --generated-only
+            if ! CONTEXT_MODE_DAEMON_PORT=0 node --test tests/*.test.mjs > "validate-$n.log" 2>&1; then
+              echo "#$n failed the unit suite on its head tree; leaving it open"
+              tail -40 "validate-$n.log" || true
+              continue
+            fi
+            # adopt the validated tree as one commit on upstream/main, then move main to it
+            NEW=$(git commit-tree "$T^{tree}" -p "$UP" -m "fork: carry the fork's changes on upstream/main $UP (reconciled via #$n)")
+            git push --force-with-lease=main:"$(git rev-parse origin/main)" origin "$NEW:refs/heads/main"
+            gh pr close "$n" --comment "Adopted as ${NEW:0:7}: the validated head tree as one commit on upstream/main $UP. The next fork-sync run rebases it forward."
+            git fetch origin main
+          done
+          git checkout -B work origin/main
+      - name: rebase main onto upstream/main
+        env:
+          GH_TOKEN: ${{ env.SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          git fetch upstream main
+          git fetch origin main   # an adoption above may have moved it
+          git checkout -B work origin/main
+          UP=$(git rev-parse upstream/main)
+          if git merge-base --is-ancestor "$UP" origin/main; then
+            echo "fork main already carries upstream/main $UP; nothing to do"
+            exit 0
+          fi
+          if git rebase upstream/main; then
+            git push --force-with-lease=main:"$(git rev-parse origin/main)" origin work:main
+            echo "rebased fork main onto upstream/main $UP"
+            exit 0
+          fi
+          # conflicting rebase: collect what conflicts, put the tree back, hand it to the agent
+          conflicts=$(git diff --name-only --diff-filter=U | sed 's/^/    /')
+          git rebase --abort
+          body=$(cat <<EOF
+          The daily rebase of fork main onto upstream/main $UP needs reconciling.
+
+          Conflicted paths:
+          $conflicts
+
+          The agentic workflow (.github/workflows/fork-sync-reconcile.md) resolves this: it rebases
+          origin/main onto upstream/main, resolves the conflicts keeping the fork's intent (the
+          shared daemon and fork-only wiring) on top of upstream's changes, runs the test suite,
+          and opens a pull request labeled \`fork-sync\`. The next fork-sync run validates that
+          pull request's head tree and adopts it as one commit on upstream/main.
+          EOF
+          )
+          n=$(gh issue list --label fork-sync --state open --json number --jq 'first(.[].number // empty)')
+          if [[ -n "$n" ]]; then
+            gh issue comment "$n" --body "Rebase onto upstream/main $UP still conflicts: $conflicts"
+          else
+            gh issue create --title "fork-sync: rebase onto upstream/main needs reconciling" --label fork-sync --body "$body"
+          fi
+          echo "::error::rebase onto upstream/main $UP conflicted; issue labeled fork-sync carries the details"
+          exit 1

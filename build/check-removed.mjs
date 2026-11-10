@@ -133,6 +133,7 @@ const ALLOWED_FILES = [
   "scripts/v1-upgrade-stop.mjs", // #1363 D-V1-UPGRADE-STOP-1: package.json build stops a 1.0.x upgrade before any write
   // v2 user docs outside docs/architecture and docs/install (cleanup-plan §2).
   "docs/how-it-works.md", "docs/tools.md", "docs/algorithms.md", "docs/performance.md", "docs/UPSTREAM-CREDITS.md",
+  "docs/daemon.md", // ADR-0026: the shared daemon guide
   // Root files.
   "README.md", "CONTRIBUTING.md", "LICENSE", "stats.json", "package.json", "tsconfig.json", ".gitignore", ".gitattributes",
   ...MAIN_TREE_FILES,

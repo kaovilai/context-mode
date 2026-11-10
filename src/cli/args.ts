@@ -7,7 +7,7 @@ import type { AgentId } from "../core/contracts/agents.ts";
 
 export type Command = "setup" | "doctor" | "upgrade";
 export const COMMANDS: readonly Command[] = ["setup", "doctor", "upgrade"];
-export const ALL_COMMANDS: readonly string[] = ["setup", "doctor", "upgrade", "server", "mcp", "hook", "help"];
+export const ALL_COMMANDS: readonly string[] = ["setup", "doctor", "upgrade", "server", "mcp", "hook", "daemon", "help"];
 export const AGENT_IDS: readonly AgentId[] = ADAPTERS.map((a) => a.id);
 
 export interface Flags {
@@ -127,6 +127,7 @@ Commands:
   doctor                      Check every agent; changes nothing
   upgrade                     Install the newest context-mode from npm, then repair each agent
   server [--agent <id>]       Run the MCP server on stdio (alias: mcp)
+  daemon [--port <n>]         Run one shared MCP server for every session (opt-in; see docs/daemon.md)
   hook --agent <id>           Run one hook call: JSON on stdin, answer on stdout
   hook <platform> <event>     Old form of hook; still works, run context-mode setup to update it
 
@@ -139,6 +140,7 @@ Examples:
   context-mode setup
   context-mode doctor --agents codex
   context-mode server --agent codex
+  context-mode daemon --install
 `;
 
 const COMMON_HELP = `  --agents <ids>     Only these agents, comma-separated (ids: context-mode setup --list)

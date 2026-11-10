@@ -207,7 +207,7 @@ export interface CtxStatsInput {} // no fields; any key is STATS_UNKNOWN_FIELD_L
 export interface CtxPurgeInput { session?: string; source?: string; project?: boolean; } // exactly one (impl/06 §6 step 1)
 
 // tools-ops (impl/07 §0, A-T1; ADR-0010, ADR-0011)
-export type DoctorCheckId = "D1" | "D2" | "D3" | "D4" | "D5" | "D5b" | "D6" | "D7" | "D8" | "D9" | "D10" | "D11";
+export type DoctorCheckId = "D1" | "D2" | "D3" | "D4" | "D5" | "D5b" | "D6" | "D7" | "D8" | "D9" | "D10" | "D11" | "D12"; // D12: ADR-0026 daemon row, outside DOCTOR_CHECK_ORDER (conditional)
 export interface DoctorRow {
   id: DoctorCheckId;
   label: string;                 // e.g. "version", "context.db"

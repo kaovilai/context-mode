@@ -42,6 +42,7 @@
       "cli.mjs",
       "codex",
       "copilot",
+      "daemon.mjs",
       "fixtures",
       "gemini-extension.json",
       "hook.mjs",

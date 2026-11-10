@@ -169,6 +169,10 @@ var EXEC_LANGUAGES = Object.freeze(["shell", "powershell", "javascript", "typesc
 var SHELL_FAMILY = Object.freeze(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
 var PLAIN_OUTPUT_ENV = Object.freeze({ NO_COLOR: "1", FORCE_COLOR: "0" });
 var HOST_SESSION_ENV = Object.freeze({ "claude-code": "CLAUDE_CODE_SESSION_ID" });
+var DAEMON_HOST = "127.0.0.1";
+var DAEMON_DEFAULT_PORT = 8790;
+var DAEMON_PATH = "/mcp";
+var DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}`;
 var NODE_MIN = "24.15.0";
 var DATA_ROOT = "~/.context-mode";
 var DATA_DIR_ENV = "CONTEXT_MODE_DATA_DIR";
@@ -483,14 +487,6 @@ var V1_SCRIPT_NAMES = Object.freeze([
 var V1_HOOK_COMMAND = "context-mode hook";
 var V1_CODEX_HOOK_COMMAND = "context-mode hook codex";
 var V1_CODEX_HOOKS_DIR = Object.freeze(["hooks", "codex"]);
-var V1_CODEX_SCRIPT_NAMES = Object.freeze([
-  "pretooluse.mjs",
-  "posttooluse.mjs",
-  "sessionstart.mjs",
-  "precompact.mjs",
-  "userpromptsubmit.mjs",
-  "stop.mjs"
-]);
 var V1_CACHE_HEAL_NAME = "context-mode-cache-heal";
 var V1_CACHE_HEAL_EXTS = Object.freeze([".mjs", ".sh"]);
 var V1_STATUSLINE_COMMAND = "context-mode statusline";
@@ -537,8 +533,6 @@ var HOOKS_KEY = "hooks";
 var STATUS_LINE_KEY = "statusLine";
 var PI_PACKAGES_KEY = "packages";
 var OPENCODE_PLUGIN_KEY = "plugin";
-var OPENCODE_PLUGINS_KEY = "plugins";
-var OPENCODE_PACKAGE_FIELD = "package";
 var OPENCODE_NPM_SPEC_PREFIX = `${SERVER_KEY}@`;
 var NPM_VERSION_SEP = "@";
 var OPENCODE_NPM_LATEST = `${OPENCODE_NPM_SPEC_PREFIX}latest`;
@@ -546,6 +540,7 @@ var PI_NPM_LATEST = `${V1_PI_PACKAGE}${NPM_VERSION_SEP}latest`;
 var V1_DATA_DIR_NAME = "context-mode";
 var V1_DATA_ROOT_ENTRIES = Object.freeze(["content", "platform.json"]);
 var V1_SESSIONS_DIR_NAME = "sessions";
+var V1_SCRIPT_EXT = ".mjs";
 var V1_BIN_COMMAND = SERVER_KEY;
 var VSCODE_MCP_SERVERS_KEY = "servers";
 var ZCODE_EVENTS_KEY = "events";
@@ -561,7 +556,7 @@ var V1_REASON = Object.freeze({
   cacheHealFile: "old context-mode cache-heal script file",
   statusLine: "old context-mode statusLine (context-mode statusline): report only, never removed",
   mcpEntry: "old context-mode MCP entry mcpServers.context-mode",
-  codexHook: "old context-mode Codex hook entry: context-mode hook codex or hooks/codex/<event>.mjs",
+  codexHook: "old context-mode Codex hook entry: context-mode hook codex or hooks/codex/*.mjs",
   codexToml: "old context-mode config.toml [mcp_servers.context-mode*] section",
   hookFile: "old context-mode hook file context-mode.json (runs context-mode hook)",
   vscodeMcp: "old context-mode MCP entry servers.context-mode in .vscode/mcp.json: report only, never removed",
@@ -596,7 +591,6 @@ var MCP_COMMAND_FIELD = "command";
 var MCP_ARGS_FIELD = "args";
 var MCP_ENV_FIELD = "env";
 var MCP_ENV_VARS_FIELD = "env_vars";
-var MCP_TOOLS_FIELD = "tools";
 var ZCODE_MCP_FEATURE_KEY = Object.freeze(["features", "mcp"]);
 var CODEX_OMIT_TOOLS_FROM_FIELD = "omit_tools_from";
 var CODEX_OMIT_DEFERRED = Object.freeze(["deferred"]);
@@ -687,6 +681,7 @@ var ISSUE_FORM_URL = `https://github.com/${ISSUE_REPO_SLUG}/issues/new?template=
 
 // src/adapters/claude-code.ts
 var TOOL_NAME_PREFIX = "mcp__plugin_context-mode_context-mode__";
+var USER_MCP_TOOL_NAME_PREFIX = "mcp__context-mode__";
 var SHELL_TOOL_NAMES = Object.freeze(["Bash", "PowerShell"]);
 var POWERSHELL_TOOL = "PowerShell";
 var SHELL_CANONICAL = "Bash";
@@ -864,7 +859,10 @@ function requireFields(raw) {
 }
 function decode(raw) {
   requireFields(raw);
-  const ev = decodeClaudeShape(raw, "claude-code", TOOL_NAME_PREFIX, CLAUDE_SOURCES);
+  const p3 = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {};
+  const toolName = typeof p3.tool_name === "string" ? p3.tool_name : "";
+  const ownPrefix = toolName.startsWith(USER_MCP_TOOL_NAME_PREFIX) ? USER_MCP_TOOL_NAME_PREFIX : TOOL_NAME_PREFIX;
+  const ev = decodeClaudeShape(raw, "claude-code", ownPrefix, CLAUDE_SOURCES);
   if (ev.tool !== void 0 && ev.tool.name === POWERSHELL_TOOL) ev.tool.canonicalName = SHELL_CANONICAL;
   if (ev.cwd === "") ev.cwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
   if (ev.event === "PostToolUse" && ev.tool !== void 0 && ev.tool.callId === void 0) {
@@ -1402,7 +1400,6 @@ function readResult6(p3) {
   const text2 = p3.content === void 0 ? "" : typeof p3.content === "string" ? p3.content : JSON.stringify(p3.content);
   const info = { isError: p3.isError === true, bytes: Buffer.byteLength(text2), text: text2 };
   if (typeof p3.exitCode === "number") info.exitCode = p3.exitCode;
-  if (p3.keep === true) info.keep = true;
   return info;
 }
 function decode9(raw) {
@@ -1479,11 +1476,6 @@ function decode10(raw) {
   const event = Object.prototype.hasOwnProperty.call(OPENCODE_EVENTS, native) ? OPENCODE_EVENTS[native] : void 0;
   if (event === void 0) throw new Error("opencode: unknown hook event " + String(p3.type));
   const ev = { event, agent: "opencode", sessionId: String(p3.sessionID ?? ""), cwd: String(p3.directory ?? "") };
-  if (typeof p3.agentID === "string" && p3.agentID !== "") {
-    ev.agentId = p3.agentID;
-    ev.agentType = p3.agentID;
-  }
-  if (Array.isArray(p3.agentTools)) ev.agentTools = p3.agentTools.filter((t2) => typeof t2 === "string");
   if (event === "UserPromptSubmit" && typeof p3.message === "string") ev.prompt = p3.message;
   if (event === "PreToolUse" || event === "PostToolUse") {
     const name = String(p3.tool ?? "");
@@ -1504,7 +1496,7 @@ function encode10(ev, d, _extra) {
       if (ev.event !== "PreToolUse") return { stdout: "", exitCode: 0 };
       return { stdout: d.rewritten === void 0 ? d.reason : d.rewritten + "\n" + d.reason, exitCode: 2 };
     case "replace":
-      return { stdout: ev.event === "PostToolUse" ? d.output : "", exitCode: 0 };
+      return { stdout: "", exitCode: 0 };
   }
 }
 
@@ -1709,7 +1701,7 @@ var ADAPTERS = Object.freeze([
   }
 ]);
 var BY_ID = new Map(ADAPTERS.map((r2) => [r2.id, r2]));
-var REPLACE_ROWS = /* @__PURE__ */ new Set(["claude-code", "gemini", "copilot-cli", "pi", "opencode"]);
+var REPLACE_ROWS = /* @__PURE__ */ new Set(["claude-code", "gemini", "copilot-cli", "pi"]);
 function hasReplace(row) {
   return REPLACE_ROWS.has(row.id);
 }
@@ -1760,7 +1752,7 @@ function unsupportedHostByName(name) {
 
 // src/cli/args.ts
 var COMMANDS = ["setup", "doctor", "upgrade"];
-var ALL_COMMANDS = ["setup", "doctor", "upgrade", "server", "mcp", "hook", "help"];
+var ALL_COMMANDS = ["setup", "doctor", "upgrade", "server", "mcp", "hook", "daemon", "help"];
 var AGENT_IDS2 = ADAPTERS.map((a2) => a2.id);
 var COMMON = ["--help", "-h", "--json", "--yes", "-y", "--no-input", "--debug", "--quiet", "-q", "--verbose", "--no-color", "--agents"];
 var FLAGS = {
@@ -1894,6 +1886,7 @@ Commands:
   doctor                      Check every agent; changes nothing
   upgrade                     Install the newest context-mode from npm, then repair each agent
   server [--agent <id>]       Run the MCP server on stdio (alias: mcp)
+  daemon [--port <n>]         Run one shared MCP server for every session (opt-in; see docs/daemon.md)
   hook --agent <id>           Run one hook call: JSON on stdin, answer on stdout
   hook <platform> <event>     Old form of hook; still works, run context-mode setup to update it
 
@@ -1906,6 +1899,7 @@ Examples:
   context-mode setup
   context-mode doctor --agents codex
   context-mode server --agent codex
+  context-mode daemon --install
 `;
 var COMMON_HELP = `  --agents <ids>     Only these agents, comma-separated (ids: context-mode setup --list)
   -y, --yes          Do not ask; apply
@@ -5035,17 +5029,17 @@ import { closeSync as closeSync2, existsSync as existsSync10, fstatSync, mkdirSy
 import { delimiter, join as join11 } from "node:path";
 
 // src/core/hooks/fallback.ts
-import { join as join5, resolve as resolve4 } from "node:path";
+import { join as join5, resolve as resolve2 } from "node:path";
 
 // src/core/policy/read-media.ts
 import { extname } from "node:path";
 var { closeSync, openSync, readSync } = process.getBuiltinModule("node:fs");
 
 // src/core/policy/own-file.ts
-import { extname as extname2, join as join4, resolve as resolve3 } from "node:path";
+import { extname as extname2, join as join4 } from "node:path";
 
 // src/core/project/contain.ts
-import { dirname as dirname3, isAbsolute, join as join3, relative, resolve as resolve2, sep } from "node:path";
+import { dirname as dirname3, join as join3, relative, sep } from "node:path";
 var { lstatSync: lstatSync2, realpathSync: realpathSync2 } = process.getBuiltinModule("node:fs");
 function components(p3) {
   return p3.split(sep).filter((c3) => c3 !== "");
@@ -5170,7 +5164,7 @@ var { existsSync: existsSync3, linkSync, mkdirSync: mkdirSync2, rmSync } = proce
 
 // src/core/ops/doctor-config.ts
 import { existsSync as existsSync9, readdirSync as readdirSync5, readFileSync as readFileSync6 } from "node:fs";
-import { dirname as dirname7, isAbsolute as isAbsolute3, join as join10, resolve as resolve5 } from "node:path";
+import { dirname as dirname7, join as join10 } from "node:path";
 
 // src/core/ops/host-text.ts
 var BOM_CODE = 65279;
@@ -7314,23 +7308,6 @@ function atomicWriteFile(file, text2, opts = {}) {
 import { existsSync as existsSync4 } from "node:fs";
 import { dirname as dirname4, join as join6 } from "node:path";
 import { fileURLToPath } from "node:url";
-function bundleDirOf(argv1, moduleFile) {
-  const own2 = dirname4(argv1);
-  if (existsSync4(join6(own2, SERVER_ENTRY_FILE))) return own2;
-  let dir = dirname4(moduleFile);
-  for (; ; ) {
-    if (existsSync4(join6(dir, SERVER_ENTRY_FILE))) return dir;
-    const up = dirname4(dir);
-    if (up === dir) return own2;
-    dir = up;
-  }
-}
-var memo;
-function ownBundleDir() {
-  const argv1 = process.argv[1] ?? "";
-  if (memo?.argv1 !== argv1) memo = { argv1, dir: bundleDirOf(argv1, fileURLToPath(import.meta.url)) };
-  return memo.dir;
-}
 
 // src/core/ops/host-config.ts
 function stripJsonComments(text2) {
@@ -7686,9 +7663,6 @@ function ownMcpValue(agent, node, server) {
   if (mcp === void 0) return void 0;
   return { ...mcp.fields, [MCP_COMMAND_FIELD]: node, [MCP_ARGS_FIELD]: [server, AGENT_ARG, agent] };
 }
-function opencodePluginFile() {
-  return ownBundleDir();
-}
 function applyEdits(agent, path15, text2, format, wanted) {
   const parsed = parseHostConfig(agent, path15, text2, format);
   let out2 = text2;
@@ -7810,7 +7784,7 @@ function flatCommands(events2, prefix) {
   return out2;
 }
 var isV1Hook = (cmd) => cmd.includes(SERVER_KEY) && (V1_SCRIPT_NAMES.some((name) => cmd.includes(name)) || cmd.includes(V1_HOOK_COMMAND));
-var isCodexScript = (cmd) => V1_PATH_SEPS.some((sep3) => V1_CODEX_SCRIPT_NAMES.some((name) => cmd.includes(V1_CODEX_HOOKS_DIR.join(sep3) + sep3 + name)));
+var isCodexScript = (cmd) => cmd.includes(V1_SCRIPT_EXT) && V1_PATH_SEPS.some((sep3) => cmd.includes(V1_CODEX_HOOKS_DIR.join(sep3) + sep3));
 function dataDir(dir, reason, out2) {
   if (existsSync6(dir)) out2.push(finding(dir, "", reason));
 }
@@ -7858,7 +7832,8 @@ function scanCodex(agentHome, out2) {
   const config = readTomlValue(tomlFile);
   for (const span of readTomlTables(tomlFile)) {
     if (span.path[0] !== V1_TOML_SECTION_ROOT || span.path[1] !== SERVER_KEY) continue;
-    if (isV2McpTable(hostConfigValueAt(config, span.path.slice(0, 2)))) continue;
+    if (span.path.length === 2 && isV2McpTable(hostConfigValueAt(config, span.path))) continue;
+    if (span.path.length === 3 && span.path[2] === MCP_ENV_FIELD && isV2McpTable(hostConfigValueAt(config, span.path.slice(0, 2)))) continue;
     out2.push(finding(tomlFile, span.header.trim(), V1_REASON.codexToml));
   }
   dataDir(join8(agentHome, V1_DATA_DIR_NAME), V1_REASON.dataDir, out2);
@@ -8021,7 +7996,7 @@ function detectV1(agent, home, scope = {}) {
 
 // src/core/ops/plugin-root.ts
 import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync4, realpathSync as realpathSync3 } from "node:fs";
-import { dirname as dirname6, isAbsolute as isAbsolute2, join as join9, sep as sep2 } from "node:path";
+import { dirname as dirname6, isAbsolute, join as join9, sep as sep2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // src/setup/pi-gate.ts
@@ -8126,7 +8101,6 @@ function piSettingsGate(env, home, pkgDir, cwd) {
 
 // src/core/ops/doctor-config.ts
 var [PART_MCP, PART_HOOKS, PART_TIMEOUT] = D3_PARTS;
-var isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 function composeMatcher(row, event) {
   let prefix = "";
   for (const ch of row.toolNamePrefix) prefix += REGEX_SPECIAL_CHARS.includes(ch) ? REGEX_ESCAPE + ch : ch;
@@ -8136,118 +8110,6 @@ function composeMatcher(row, event) {
   return MATCHER_OPEN + alts.join(MATCHER_ALT) + MATCHER_CLOSE;
 }
 var CODEX_PLUGIN_KEY = `${SERVER_KEY}@${SERVER_KEY}`;
-function opencodeEntrySpec(entry2) {
-  return isObject(entry2) ? entry2[OPENCODE_PACKAGE_FIELD] : Array.isArray(entry2) ? entry2[0] : entry2;
-}
-function isNativeOpencodeEntry(entry2, key) {
-  const spec = opencodeEntrySpec(entry2);
-  if (typeof spec !== "string") return false;
-  return spec.startsWith(OPENCODE_NPM_SPEC_PREFIX) || key === OPENCODE_PLUGINS_KEY && spec === SERVER_KEY;
-}
-function stringLiterals(src) {
-  const out2 = [];
-  let i2 = 0;
-  while (i2 < src.length) {
-    const c3 = src[i2];
-    if (c3 === "/" && src[i2 + 1] === "/") {
-      const n3 = src.indexOf("\n", i2);
-      i2 = n3 < 0 ? src.length : n3;
-      continue;
-    }
-    if (c3 === "/" && src[i2 + 1] === "*") {
-      const n3 = src.indexOf("*/", i2 + 2);
-      i2 = n3 < 0 ? src.length : n3 + 2;
-      continue;
-    }
-    if (c3 === '"' || c3 === "'" || c3 === "`") {
-      let j2 = i2 + 1;
-      let s = "";
-      while (j2 < src.length && src[j2] !== c3) {
-        if (src[j2] === "\\") {
-          s += src[j2 + 1] ?? "";
-          j2 += 2;
-          continue;
-        }
-        s += src[j2];
-        j2++;
-      }
-      out2.push(s);
-      i2 = j2 + 1;
-      continue;
-    }
-    i2++;
-  }
-  return out2;
-}
-var OPENCODE_PLUGINS_DIR = "plugins";
-var OPENCODE_PROJECT_DIR = ".opencode";
-var OPENCODE_PLUGIN_EXTS = [".js", ".mjs", ".ts"];
-var OPENCODE_PLUGIN_INDEX = "index";
-var OPENCODE_DIR_FILE_MAX = 64 * 1024;
-var OWN_PLUGIN_MODULES = [SERVER_KEY, `${SERVER_KEY}/server`];
-var FILE_URL_PREFIX = "file://";
-var NODE_MODULES_DIR = "node_modules";
-var PACKAGE_JSON_FILE = "package.json";
-var OPENCODE_PACKAGE_DIR_HINT = `${NODE_MODULES_DIR}/${SERVER_KEY}`;
-function opencodePluginDirs(configDir, worktree) {
-  return [configDir, opencodeProjectDir(worktree)];
-}
-function opencodeProjectDir(worktree) {
-  return join10(worktree, OPENCODE_PROJECT_DIR);
-}
-function packageResolves(fromDir) {
-  for (let d = fromDir; ; d = dirname7(d)) {
-    if (existsSync9(join10(d, NODE_MODULES_DIR, SERVER_KEY, PACKAGE_JSON_FILE))) return true;
-    if (dirname7(d) === d) return false;
-  }
-}
-function opencodeDirPlugins(dirs) {
-  const bundle = opencodePluginFile();
-  const ownFile = join10(bundle, ...OPENCODE_PLUGIN_PATH).split("\\").join("/");
-  const isModule = (p3) => OWN_PLUGIN_MODULES.includes(p3);
-  const isPath = (p3) => {
-    if (p3 === ownFile || p3 === `${FILE_URL_PREFIX}${ownFile}`) return true;
-    const seg = p3.split("/");
-    const n3 = seg.length;
-    return n3 >= 3 && seg[n3 - 1] === "plugin.js" && seg[n3 - 2] === "opencode" && seg[n3 - 3] === SERVER_KEY;
-  };
-  const out2 = [];
-  for (const dir of dirs) {
-    const pdir = join10(dir, OPENCODE_PLUGINS_DIR);
-    let names;
-    try {
-      names = readdirSync5(pdir);
-    } catch {
-      continue;
-    }
-    for (const name of names) {
-      const loose = OPENCODE_PLUGIN_EXTS.some((x2) => name.endsWith(x2)) ? [join10(pdir, name)] : [];
-      const files = [...loose, ...OPENCODE_PLUGIN_EXTS.map((x2) => join10(pdir, name, `${OPENCODE_PLUGIN_INDEX}${x2}`))];
-      for (const f2 of files) {
-        let text2;
-        try {
-          const b3 = readFileSync6(f2);
-          if (b3.length > OPENCODE_DIR_FILE_MAX) continue;
-          text2 = b3.toString("utf8");
-        } catch {
-          continue;
-        }
-        const lits = stringLiterals(text2).map((s) => s.split("\\").join("/")).filter((p3) => isModule(p3) || isPath(p3));
-        if (!lits.length) continue;
-        const loads2 = lits.some((p3) => {
-          if (isModule(p3)) return packageResolves(dirname7(f2));
-          const bare = p3.startsWith(FILE_URL_PREFIX) ? p3.slice(FILE_URL_PREFIX.length) : p3;
-          return existsSync9(isAbsolute3(bare) ? bare : resolve5(dirname7(f2), bare));
-        });
-        out2.push({ file: f2, loads: loads2 });
-      }
-    }
-  }
-  return out2;
-}
-function opencodeDirPlugin(dirs) {
-  return opencodeDirPlugins(dirs).find((p3) => p3.loads)?.file;
-}
 
 // src/core/ops/doctor-issue.ts
 function formUrl(title, summary) {
@@ -8524,8 +8386,6 @@ function hookInstallFor(ctx, row, command) {
       kind: "plugin-list",
       file: path4.join(opencodeDirOf(ctx.env, ctx.home), OPENCODE_BASE_CONFIG_FILE),
       key: ["plugin"],
-      worktree: ctx.cwd ?? process.cwd(),
-      // D-R54-OC-PLUGINS-DIR-1: <project>/.opencode/plugins
       entry: ctx.pkgDir
     };
   }
@@ -9039,14 +8899,14 @@ async function listPluginHooks(env, pluginId, cwd) {
 function askPluginHooks(env, pluginId, cwd) {
   const bin = whichBin("codex", env);
   if (!bin) return Promise.resolve({ kind: "absent" });
-  return new Promise((resolve6) => {
+  return new Promise((resolve3) => {
     let asked;
     const done_ = (hooks) => hooks === void 0 ? { kind: "silent" } : { kind: "list", hooks, codexHome: asked };
     let f2;
     try {
       f2 = spawnForm(bin, ["app-server"], env);
     } catch {
-      resolve6({ kind: "silent" });
+      resolve3({ kind: "silent" });
       return;
     }
     const child = spawn(f2.command, f2.args, { env, cwd, stdio: ["pipe", "pipe", "ignore"], windowsVerbatimArguments: f2.windowsVerbatimArguments, windowsHide: true });
@@ -9056,7 +8916,7 @@ function askPluginHooks(env, pluginId, cwd) {
     let result;
     const settle = () => {
       clearTimeout(grace);
-      resolve6(done_(result));
+      resolve3(done_(result));
     };
     let grace;
     const finish2 = (v) => {
@@ -9195,12 +9055,12 @@ function frame(buf) {
 function listCopilotHooks(env, file, cwd) {
   const bin = whichBin("copilot", env);
   if (!bin) return Promise.resolve(void 0);
-  return new Promise((resolve6) => {
+  return new Promise((resolve3) => {
     let f2;
     try {
       f2 = spawnForm(bin, ["--server", "--stdio", "--no-auto-update"], env);
     } catch {
-      resolve6(void 0);
+      resolve3(void 0);
       return;
     }
     const child = spawn2(f2.command, f2.args, { env, cwd, stdio: ["pipe", "pipe", "ignore"], windowsVerbatimArguments: f2.windowsVerbatimArguments, windowsHide: true });
@@ -9212,7 +9072,7 @@ function listCopilotHooks(env, file, cwd) {
       clearTimeout(timer);
       child.stdin.destroy();
       child.kill();
-      resolve6(v);
+      resolve3(v);
     };
     const timer = setTimeout(() => finish2(void 0), ASK_TIMEOUT_MS2);
     child.on("error", () => finish2(void 0));
@@ -9288,7 +9148,7 @@ function hookSample(id, cwd, text2) {
     case "pi":
       return { effect, payload: { type: event, sessionId: SAMPLE_SESSION, cwd, toolName: tool, input: command, content: text2, isError: false } };
     case "opencode":
-      return { effect, payload: { type: event, sessionID: SAMPLE_SESSION, directory: cwd, tool, args: command, ...effect === "replace" ? { output: text2 } : {} } };
+      return { effect, payload: { type: event, sessionID: SAMPLE_SESSION, directory: cwd, tool, args: command } };
     case "codex":
     case "qwen":
     case "vscode":
@@ -9521,8 +9381,9 @@ function planCodexTrust(row, edits, hooksFile, file, command, env) {
     prior.changes.push(...changes);
   } else edits.push({ file, before: text2, after: res.text, changes });
 }
+var NATIVE_PLUGIN_PREFIX = "context-mode@";
 function isNativeSpec(e) {
-  return isNativeOpencodeEntry(e, OPENCODE_PLUGIN_KEY);
+  return typeof e === "string" && e.startsWith(NATIVE_PLUGIN_PREFIX);
 }
 function isStaleOwnPlugin(e, entry2) {
   if (typeof e !== "string" || e === entry2 || !path12.isAbsolute(e)) return false;
@@ -9538,31 +9399,10 @@ function wantedPluginList(list2, entry2, nativeElsewhere = false) {
   const kept = list2.filter((e) => !(native && e === entry2) && !isStaleOwnPlugin(e, entry2));
   return native || kept.includes(entry2) ? kept : [...kept, entry2];
 }
-function nativePluginsKey(doc, file) {
-  const native = (d) => isObj5(d) && [OPENCODE_PLUGINS_KEY, OPENCODE_PLUGIN_KEY].some((k) => {
-    const v = d[k];
-    return Array.isArray(v) && v.some((e) => isNativeOpencodeEntry(e, k));
-  });
-  if (native(doc)) return true;
-  if (opencodeDirPlugin([path12.dirname(file)]) !== void 0) return true;
-  return OPENCODE_CONFIG_FILES.map((n3) => path12.join(path12.dirname(file), n3)).filter((f2) => f2 !== file).some((f2) => {
-    const text2 = readOr(f2);
-    if (text2 === void 0 || text2.trim() === "") return false;
-    try {
-      return native(parseHostConfig("opencode", f2, text2, "jsonc"));
-    } catch {
-      return false;
-    }
-  });
-}
-function projectPluginFile(h2) {
-  return opencodeDirPlugin([opencodeProjectDir(h2.worktree)]);
-}
-function fixLineOf(row) {
-  const h2 = row.hookInstall;
-  if (h2.kind !== "plugin-list") return void 0;
-  const proj = projectPluginFile(h2);
-  return proj !== void 0 && pluginListIssue(h2)?.startsWith(proj) ? `remove ${proj}` : void 0;
+var OC2_NATIVE_KEY = "plugins";
+function nativePluginsKey(doc) {
+  const v = isObj5(doc) ? doc[OC2_NATIVE_KEY] : void 0;
+  return Array.isArray(v) && v.some(isNativeSpec);
 }
 function pluginListIssue(h2) {
   const text2 = readOr(h2.file);
@@ -9575,10 +9415,7 @@ function pluginListIssue(h2) {
   }
   const cur = isObj5(doc) ? doc[h2.key[0]] : void 0;
   const list2 = Array.isArray(cur) ? cur : [];
-  const listed = list2.includes(h2.entry);
-  if (listed && nativePluginsKey(doc, h2.file)) return `${h2.file}: context-mode loads twice (native entry and ${h2.entry}), every hook fires twice; run: context-mode setup`;
-  const proj = listed ? projectPluginFile(h2) : void 0;
-  if (proj !== void 0) return `${proj}: context-mode loads twice in this project (this file and ${h2.entry} in ${h2.file}), every hook fires twice; remove ${proj}, the ${h2.file} entry loads the hooks in every project`;
+  if ((list2.some(isNativeSpec) || nativePluginsKey(doc)) && list2.includes(h2.entry)) return `${h2.file}: context-mode loads twice (native entry and ${h2.entry}), every hook fires twice; run: context-mode setup`;
   const stale = list2.find((e) => isStaleOwnPlugin(e, h2.entry));
   if (stale !== void 0) return `${h2.file}: plugin file missing, so OpenCode never loads the hooks (${String(stale)}); run: context-mode setup`;
   return void 0;
@@ -9605,7 +9442,7 @@ function planHookInstall(row, edits, env) {
     planJsonKeys(row, edits, h2.file, fileFormat(row, h2.file), (doc) => {
       const cur = doc[h2.key[0]];
       const list2 = Array.isArray(cur) ? cur : [];
-      const want = wantedPluginList(list2, h2.entry, nativePluginsKey(doc, h2.file));
+      const want = wantedPluginList(list2, h2.entry, nativePluginsKey(doc));
       if (cur === void 0 && want.length === 0) return [];
       return [[h2.key, want.length === list2.length && want.every((e, i2) => e === list2[i2]) ? list2 : want]];
     });
@@ -9669,61 +9506,49 @@ function statusOf(row, text2) {
   }
   return void 0;
 }
-function opencodeVersion(bin, env) {
+function opencodeMajor(bin, env) {
   const r2 = runBin(bin, ["--version"], env);
   const text2 = `${r2.stdout}${r2.stderr}`;
   const digits = text2.split("").filter((c3) => c3 >= "0" && c3 <= "9" || c3 === ".").join("");
-  if (!digits.split(".")[0]) return { error: `${bin} --version printed no version: ${text2.trim().split("\n")[0] ?? ""}` };
-  return { major: Number(digits.split(".")[0]) };
+  return Number(digits.split(".")[0]);
 }
-function opencodeMajor(bin, env) {
-  const v = opencodeVersion(bin, env);
-  return "major" in v ? v.major : Number.NaN;
+function opencodeListArgs(major) {
+  return major >= 2 ? ["mcp", "list", "--standalone"] : ["mcp", "list", "--pure"];
 }
-var OC_CONFIG_ARGS = { 1: ["debug", "config", "--pure"], 2: ["debug", "config", "--standalone"] };
-function opencodeListCheck(bin, major, env) {
-  const args = major >= 2 ? OC_CONFIG_ARGS[2] : OC_CONFIG_ARGS[1];
-  const r2 = runBin(bin, [...args], env);
-  const what = `${bin} ${args.join(" ")}`;
-  const first = (s) => `${s}`.trim().split("\n")[0] ?? "";
-  let out2;
+var OC2_CONFIG_ARGS = ["debug", "config", "--standalone"];
+function opencode2ListCheck(bin, env) {
+  const r2 = runBin(bin, OC2_CONFIG_ARGS, env);
+  const what = `${bin} ${OC2_CONFIG_ARGS.join(" ")}`;
+  let docs;
   try {
-    out2 = JSON.parse(`${r2.stdout}`);
+    docs = JSON.parse(`${r2.stdout}`);
   } catch {
-    out2 = void 0;
+    docs = void 0;
   }
-  if (r2.status !== 0) return { name: "list", ok: false, detail: `${what} exited ${r2.status}: ${first(r2.stderr)}` };
-  if (major >= 2) {
-    if (!Array.isArray(out2)) return { name: "list", ok: false, detail: `${what} printed no config list: ${first(r2.stdout)}` };
-    const listed2 = out2.some((d) => isObj5(d) && isObj5(d.info) && isObj5(d.info.mcp) && isObj5(d.info.mcp.servers) && isObj5(d.info.mcp.servers[SERVER_KEY]));
-    const read = out2.filter(isObj5).map((d) => d.path).filter((p3) => typeof p3 === "string");
-    return { name: "list", ok: listed2, detail: listed2 ? void 0 : `${what} does not load mcp.servers.${SERVER_KEY}; it read: ${read.join(", ") || "no config"}` };
-  }
-  if (!isObj5(out2)) return { name: "list", ok: false, detail: `${what} printed no config: ${first(r2.stdout)}` };
-  const mcp = isObj5(out2.mcp) ? out2.mcp : {};
-  const listed = isObj5(mcp[SERVER_KEY]);
-  return { name: "list", ok: listed, detail: listed ? void 0 : `${what} does not load mcp.${SERVER_KEY}; it loads mcp: ${Object.keys(mcp).join(", ") || "none"}` };
+  if (r2.status !== 0) return { name: "list", ok: false, detail: `${what} exited ${r2.status}: ${`${r2.stderr}`.trim().split("\n")[0] ?? ""}` };
+  if (!Array.isArray(docs)) return { name: "list", ok: false, detail: `${what} printed no config list: ${`${r2.stdout}`.trim().split("\n")[0] ?? ""}` };
+  const listed = docs.some((d) => isObj5(d) && isObj5(d.info) && isObj5(d.info.mcp) && isObj5(d.info.mcp.servers) && isObj5(d.info.mcp.servers[SERVER_KEY]));
+  const read = docs.filter(isObj5).map((d) => d.path).filter((p3) => typeof p3 === "string");
+  return { name: "list", ok: listed, detail: listed ? void 0 : `${what} does not load mcp.servers.${SERVER_KEY}; it read: ${read.join(", ") || "no config"}` };
 }
-var HOST_BROKEN_PREFIX = "host broken: run ";
 var HOST_BROKEN = {
-  copilot: [
-    { text: "no platform package found", prefix: HOST_BROKEN_PREFIX, fix: "npm install -g @github/copilot" },
-    { text: "GitHub Copilot CLI was not found", prefix: "copilot not installed: run ", fix: "npm install -g @github/copilot" }
-  ]
+  copilot: { text: "no platform package found", fix: "npm install -g @github/copilot" }
 };
+var HOST_BROKEN_PREFIX = "host broken: run ";
 function hostBroken(bin, out2) {
-  const b3 = HOST_BROKEN[bin]?.find((e) => out2.includes(e.text));
-  if (!b3) return void 0;
-  const lines = out2.trim().split("\n");
-  return `${b3.prefix}${b3.fix} (${(lines.find((l) => l.includes(b3.text)) ?? lines[0]).trim()})`;
+  const b3 = HOST_BROKEN[bin];
+  if (!b3 || !out2.includes(b3.text)) return void 0;
+  return `${HOST_BROKEN_PREFIX}${b3.fix} (${out2.trim().split("\n")[0]})`;
 }
 function listState(row, env) {
-  const l = row.listCommand;
-  if (!l || !hostBin(l.bin, env).file) return { status: void 0 };
+  let l0 = row.listCommand;
+  if (!l0 || !hostBin(l0.bin, env).file) return { status: void 0 };
   if (row.id === "opencode") {
-    const v = opencodeVersion(l.bin, env);
-    return { check: "major" in v ? opencodeListCheck(l.bin, v.major, env) : { name: "list", ok: false, detail: v.error }, status: void 0 };
+    const major = opencodeMajor(l0.bin, env);
+    if (major >= 2) return { check: opencode2ListCheck(l0.bin, env), status: void 0 };
+    l0 = { bin: l0.bin, args: opencodeListArgs(major) };
   }
+  const l = l0;
   const r2 = runBin(l.bin, l.args, env);
   const out2 = `${r2.stdout}${r2.stderr}`;
   const ok = r2.status === 0 && out2.includes("context-mode");
@@ -9809,7 +9634,7 @@ function degradedDetail(node, env) {
   return `only ctx_doctor is served: ${D2_SQLITE_DETAIL} under ${node}${v ? ` ${v}` : ""}. Fix: ${D2_SQLITE_FIX}`;
 }
 function mcpCheck(cmd, env) {
-  return new Promise((resolve6) => {
+  return new Promise((resolve3) => {
     const child = spawn3(cmd[0], cmd.slice(1), { env, stdio: ["pipe", "pipe", "ignore"], detached: process.platform !== "win32", windowsHide: true });
     const reap = () => {
       child.kill();
@@ -9821,7 +9646,7 @@ function mcpCheck(cmd, env) {
       clearTimeout(timer);
       process.off("exit", reap);
       child.kill();
-      resolve6({ name: "mcp", ok, detail });
+      resolve3({ name: "mcp", ok, detail });
     };
     const timer = setTimeout(() => done(false, "no MCP answer before timeout"), VERIFY_TIMEOUT_MS);
     child.on("error", (e) => done(false, e.message));
@@ -9914,7 +9739,6 @@ function ownConfigEdits(row, c3, text2) {
   const ownEnv = value[MCP_ENV_FIELD];
   if (isObj5(userEnv) || isObj5(ownEnv)) value[MCP_ENV_FIELD] = { ...isObj5(userEnv) ? userEnv : {}, ...isObj5(ownEnv) ? ownEnv : {} };
   if (Array.isArray(cur[MCP_ENV_VARS_FIELD])) value[MCP_ENV_VARS_FIELD] = cur[MCP_ENV_VARS_FIELD];
-  if (isObj5(cur[MCP_TOOLS_FIELD])) value[MCP_TOOLS_FIELD] = cur[MCP_TOOLS_FIELD];
   return [[c3.key, value], ...edits.slice(1)];
 }
 function parseCheck(row) {
@@ -9942,8 +9766,7 @@ function hookRegisteredCheck(row, env, list2) {
   } catch (e) {
     return { name: "hook-registered", ok: false, detail: e.message };
   }
-  const kept = !edits.length && h2.kind === "plugin-list" ? pluginListIssue(h2) : void 0;
-  if (!edits.length) return kept === void 0 ? { name: "hook-registered", ok: true } : { name: "hook-registered", ok: false, detail: kept };
+  if (!edits.length) return { name: "hook-registered", ok: true };
   const trust = h2.kind === "file" ? h2.trust : void 0;
   if (trust && edits.every((e) => e.file === trust && e.changes.every((c3) => isTrust(row, c3)))) return { name: "hook-registered", ok: false, detail: `${h2.file}: the context-mode hooks are not trusted in ${trust}; re-run setup` };
   const issue = h2.kind === "plugin-list" ? pluginListIssue(h2) : h2.kind === "file" && row.id === "kiro" ? kiroDisabledIssue(h2) : void 0;
@@ -10326,7 +10149,7 @@ function detectAgents(reg, ctx) {
   return reg.filter((r2) => existsSync17(agentHomeDir(r2.id, ctx)) || r2.listCommand && which(r2.listCommand.bin, ctx.env)).map((r2) => r2.id);
 }
 async function runSetup(opts) {
-  const ctx = { home: opts.home, pkgDir: opts.pkgDir, env: opts.env, cwd: opts.cwd };
+  const ctx = { home: opts.home, pkgDir: opts.pkgDir, env: opts.env };
   const runId = opts.runId ?? (/* @__PURE__ */ new Date()).toISOString().split(":").join("-").split(".").join("-");
   const reg = buildRegistry(ctx);
   const nodeVersion = opts.nodeVersion ?? process.version;
@@ -10421,22 +10244,19 @@ async function setupRow(row, ctx, run, dryRun) {
       if (w) res.checks = res.checks.map((c3) => c3.name === "copy" ? w : c3);
     }
     const bad = res.checks.filter((c3) => !c3.ok);
-    const keep = bad.length === 1 && bad[0].name === "hook-registered" ? fixLineOf(row) : void 0;
-    if (keep) return { ...res, status: "FAIL", reason: `${bad[0].name}: ${bad[0].detail}`, fix: keep };
     if (bad.length) throw new Error(bad.map((c3) => `${c3.name}: ${c3.detail}`).join("; "));
   } catch (e) {
-    const fix = fixLineOf(row);
     run.rollback(row.id, ctx.env);
     const broken = row.cli ? hostBroken(row.cli.bin, e.message) : void 0;
     if (broken) return { ...res, status: "SKIPPED", reason: broken };
-    return { ...res, status: "FAIL", reason: e.message, rolledBack: true, ...fix ? { fix } : {} };
+    return { ...res, status: "FAIL", reason: e.message, rolledBack: true };
   }
   return res;
 }
 var V1_FORM_REASON = "old context-mode entry, run: context-mode setup";
 var NOT_SET_UP_REASON = "not set up, run context-mode setup";
 async function runDoctor(opts) {
-  const ctx = { home: opts.home, pkgDir: opts.pkgDir, env: opts.env, cwd: opts.cwd };
+  const ctx = { home: opts.home, pkgDir: opts.pkgDir, env: opts.env };
   const reg = buildRegistry(ctx);
   for (const f2 of ["server.mjs", "hook.mjs"]) {
     if (!existsSync17(path12.join(ctx.pkgDir, f2))) return { exitCode: 1, agents: [], error: `preflight: ${path12.join(ctx.pkgDir, f2)} is missing` };
@@ -10471,8 +10291,6 @@ async function runDoctor(opts) {
         if (bad.length) {
           res.status = "FAIL";
           res.reason = bad.map((c3) => `${c3.name}: ${c3.detail}`).join("; ");
-          const fix = fixLineOf(row);
-          if (fix) res.fix = fix;
         }
       }
     }
@@ -10485,10 +10303,7 @@ function notSetUpReason(row, res, env) {
   const h2 = row.hookInstall;
   const missing = row.id === "opencode" && h2.kind === "plugin-list" && res.changes.some((c3) => c3.path === h2.key[0]);
   const oc2 = missing && hostBin("opencode", env).file !== void 0 && opencodeMajor("opencode", env) >= 2;
-  const dead = missing ? opencodeDirPlugins(opencodePluginDirs(path12.dirname(h2.file), h2.worktree)).find((p3) => !p3.loads) : void 0;
-  const hint = dead ? `; ${dead.file} loads context-mode once ${OPENCODE_PACKAGE_DIR_HINT} is next to it or above it` : "";
-  if (oc2) return `${NOT_SET_UP_REASON}, or run: opencode plugin add context-mode${hint}`;
-  if (hint) return NOT_SET_UP_REASON + hint;
+  if (oc2) return `${NOT_SET_UP_REASON}, or run: opencode plugin add context-mode`;
   if (row.id === "gemini" && hostBin("gemini", env).file !== void 0) return `${NOT_SET_UP_REASON}, or run: ${NATIVE_INSTALL.gemini[0]}`;
   return NOT_SET_UP_REASON;
 }
@@ -10639,7 +10454,7 @@ function table(agents) {
   return [`${"AGENT".padEnd(13)} STATUS  DETAIL`, ...rows].join("\n");
 }
 function failLines(agents) {
-  return agents.filter((a2) => a2.status === "FAIL").map((a2) => `FAIL ${a2.id}: ${a2.reason ?? "failed"}. Fix: ${a2.fix ?? fixFor(a2.id)}`);
+  return agents.filter((a2) => a2.status === "FAIL").map((a2) => `FAIL ${a2.id}: ${a2.reason ?? "failed"}. Fix: ${fixFor(a2.id)}`);
 }
 function verboseLines(agents) {
   return agents.flatMap((a2) => a2.checks.map((c3) => `  ${a2.id} ${c3.warn ? "WARN" : c3.ok ? "ok  " : "FAIL"} ${c3.name}${c3.detail ? `: ${c3.detail}` : ""}`));
@@ -10947,7 +10762,7 @@ async function doctor(ui) {
   const p3 = ui.clack;
   if (!p3 || code === EXIT_OK) return code;
   let worst = code;
-  for (const a2 of res.agents.filter((x2) => x2.status === "FAIL" && x2.fix === void 0)) {
+  for (const a2 of res.agents.filter((x2) => x2.status === "FAIL")) {
     const ok = await p3.confirm({ message: `Fix ${a2.id} now? (runs ${fixFor(a2.id)})`, initialValue: true });
     if (p3.isCancel(ok)) return EXIT_SIGINT;
     if (!ok) continue;
@@ -11051,6 +10866,7 @@ var EXIT_USAGE2 = 2;
 var EXIT_SIGINT2 = 130;
 var SERVER_FILE = "server.mjs";
 var HOOK_FILE = "hook.mjs";
+var DAEMON_FILE = "daemon.mjs";
 var PACKAGE_FILE = "package.json";
 var V1_PLATFORM_AGENT = Object.freeze({
   "claude-code": "claude-code",
@@ -11074,6 +10890,7 @@ function route(argv, version) {
   if (cmd === void 0 || cmd === "-h" || cmd === "--help" || cmd === "help") return { kind: "exit", code: EXIT_OK2, stdout: HELP2 };
   if (cmd === "-v" || cmd === "--version") return { kind: "exit", code: EXIT_OK2, stdout: version + "\n" };
   if (cmd === "server" || cmd === "mcp") return { kind: "run", file: SERVER_FILE, args: rest };
+  if (cmd === "daemon") return { kind: "run", file: DAEMON_FILE, args: rest };
   if (cmd === "hook") {
     if (rest.includes(AGENT_ARG)) return { kind: "run", file: HOOK_FILE, args: rest };
     const [platform = ""] = rest;

@@ -431,9 +431,16 @@ describe("PRD-v2 section 10: seeded hook fuzz on every host", () => {
       const cases = casesFor(host);
       const bad = [];
       let ran = 0;
+      let retried = 0;
+      // A win32 CI runner under the suite's full concurrency can stretch one spawn past the 5 s
+      // budget (observed once in 500 seeded calls: 5016 ms) without the hook being slower in
+      // kind — the budget measures wall-clock node startup too. node:test has no retries option,
+      // so a timeout-only failure on win32 is re-run once, in place; every other invariant stays
+      // strict on every platform.
+      const timeoutOnly = (pr) => pr.length > 0 && pr.every((p) => p.startsWith("timed out after ") || p.startsWith("call took "));
       await pool(cases, async (c) => {
         const env = envFor(rng(Math.floor(c.envR * 4294967296)), home);
-        const res = await runHook(host, c.stdin, env, spawnCwd(c));
+        let res = await runHook(host, c.stdin, env, spawnCwd(c));
         ran++;
         const cn = (COUNT[host] ??= { calls: 0, empty: 0, answer: 0, deny: 0, exit2: 0 });
         cn.calls++;
@@ -442,10 +449,16 @@ describe("PRD-v2 section 10: seeded hook fuzz on every host", () => {
         if (res.status === 2) cn.exit2++;
         slow.push({ host, name: c.name, ms: Math.round(res.ms) });
         if (slow.length > 400) { slow.sort((a, b) => b.ms - a.ms); slow.length = 50; }
-        const pr = problems(host, c, res);
+        let pr = problems(host, c, res);
+        if (timeoutOnly(pr) && process.platform === "win32") {
+          retried++;
+          res = await runHook(host, c.stdin, env, spawnCwd(c));
+          pr = problems(host, c, res);
+        }
         if (pr.length > 0) bad.push({ name: c.name, problems: pr, stdin: c.stdin.length > 600 ? c.stdin.slice(0, 600) + `...(${c.stdin.length} chars)` : c.stdin, stderr: res.stderr.slice(0, 300) });
       });
       assert.equal(ran, cases.length);
+      if (retried > 0) console.log(`hook-fuzz ${host}: ${retried} win32 timeout-only case(s) re-run once`);
       // The generator must reach the deny path; a fuzz that only sees empty answers proves nothing.
       if (N >= 200) assert.ok(COUNT[host].deny > 0 || host === "kiro" && COUNT[host].exit2 > 0, host + ": no deny seen in " + ran + " calls, the generator misses the policy");
       assert.equal(bad.length, 0, host + ": " + bad.length + " of " + cases.length + " calls broke an invariant. First 3: " + JSON.stringify(bad.slice(0, 3), null, 1));

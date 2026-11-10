@@ -572,11 +572,11 @@ describe("ADR-0013 repo: scheduled workflows", () => {
   const read = (p) => readFileSync(root + p, "utf8");
   const lines = (s) => s.split("\n").map((l) => l.trim());
 
-  test("weekly.yml: schedule, dispatch, one job", () => {
+  test("weekly.yml: FORK ONLY — no schedule (the release smoke targets the upstream-only release branch); dispatch only, one job", () => {
     const y = read(".github/workflows/weekly.yml");
     const l = lines(y);
     assert.ok(l.includes("name: weekly"));
-    assert.ok(l.includes('schedule: [{ cron: "0 4 * * 1" }]'));
+    assert.ok(!l.some((x) => x.includes("schedule:")), "the fork carries no release branch to smoke weekly");
     assert.ok(l.includes("workflow_dispatch: {}"));
     assert.ok(l.includes("weekly:"));
     assert.ok(l.includes("runs-on: ubuntu-latest"));
@@ -2154,20 +2154,20 @@ describe("ADR-0015 repo: README stats job and brand (D-README-STATS-1)", () => {
     for (const r of h.v1_marketplace) assert.ok(Number.isInteger(r[1]) && r[2].length === 40, `v1 row ${r[0]} names its commit`);
   });
 
-  test("readme-stats.yml: capture job daily, on each v2-design push and by hand; README job main only; commits only on change (D-README-STATS-1, D-README-HISTORY-1)", () => {
+  test("readme-stats.yml: FORK ONLY — no schedule (daily data commits would collide with upstream's on every fork-sync rebase); by hand only; commits only on change (D-README-STATS-1, D-README-HISTORY-1)", () => {
     const y = readRepo(".github/workflows/readme-stats.yml");
-    for (const need of ["schedule:", "cron:", "workflow_dispatch:", "contents: write", "secrets.GITHUB_TOKEN", "if: github.ref == 'refs/heads/main'",
+    for (const need of ["workflow_dispatch:", "contents: write", "secrets.GITHUB_TOKEN", "if: github.ref == 'refs/heads/main'",
       "build/readme-stats.mjs", "render.mjs star-history", "git diff --quiet", "PLAYWRIGHT_DIR",
-      "push:", "branches: [v2-design]", "paths-ignore:", "concurrency:", "node build/readme-stats.mjs --history"]) assert.ok(y.includes(need), `readme-stats.yml lacks ${need}`);
+      "concurrency:", "node build/readme-stats.mjs --history"]) assert.ok(y.includes(need), `readme-stats.yml lacks ${need}`);
+    // the fork runs no schedule and no v2-design push (the branch is upstream-only): both would
+    // commit adoption data on fork main that collides with upstream's own daily commit on rebase
+    for (const gone of ["schedule:", "cron:", "push:", "branches: [v2-design]", "paths-ignore:"]) assert.ok(!y.includes(gone), `readme-stats.yml still has ${gone}`);
     assert.ok(!y.includes("curl "), "readme-stats.yml has curl");
     const secrets = y.split("secrets.").slice(1).map((s) => s.split(" ")[0]);
     assert.deepEqual(secrets, ["TRAFFIC_TOKEN", "GITHUB_TOKEN"], "TRAFFIC_TOKEN reads traffic; GITHUB_TOKEN reads stars for the README job");
     const capture = y.slice(y.indexOf("\n  capture:"), y.indexOf("\n  readme-stats:"));
     assert.ok(capture.includes("GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}"), "gh api reads traffic with TRAFFIC_TOKEN");
     assert.ok(capture.includes("git add \"$F\"") && !capture.includes("README") && !capture.includes("git add ."), "capture commits the history file only");
-    const ignore = y.slice(y.indexOf("paths-ignore:"), y.indexOf("workflow_dispatch:"));
-    assert.ok(ignore.includes("docs/assets/readme/data/adoption-history.json"), "its own output starts no run");
-    assert.ok(y.split("\n").slice(0, 8).join("\n").includes("default branch"), "header: scheduled jobs run only on the default branch");
   });
 
   test("README npm badge reads the npm downloads API with a label that says what it counts; no users or marketplace badge, no live count in the hero (D-README-GW-CALM-1)", () => {

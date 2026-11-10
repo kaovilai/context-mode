@@ -1,7 +1,8 @@
 # Scheduled checks (impl/13 §14.2). Written on v2-design; adding it to main is the owner's step (D-M6-arch-7).
+# FORK ONLY: no schedule here. The release smoke targets the `release` branch, which this fork does
+# not carry (upstream-only), so the scheduled run could only fail; workflow_dispatch still runs it by hand.
 name: weekly
 on:
-  schedule: [{ cron: "0 4 * * 1" }]
   workflow_dispatch: {}
 jobs:
   weekly:
