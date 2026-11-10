@@ -14,14 +14,15 @@ import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { claudeDirOf, codexDirOf, copilotDirOf, dataRootOf, geminiDirOf, kiroDirOf, opencodeDirOf } from "../core/project/config-dir.ts";
-import { AGENT_HOME_DIR, D2_NODE_DETAIL, D2_NODE_FIX, D2_SQLITE_DETAIL, D2_SQLITE_FIX, DB_FILE_NAME, DAEMON_CHECK_DOWN_DETAIL, DAEMON_CHECK_FIX, DAEMON_CHECK_PASS_DETAIL, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PROBE_TIMEOUT_MS, MCP_ENV_FIELD, MCP_ENV_VARS_FIELD, SETUP_MANIFEST_FILE, NATIVE_INSTALL, OPENCODE_PLUGIN_PATH, PROJECTS_DIR_NAME, SERVER_KEY, TOOL_ORDER, UPGRADE_REPORT_ONLY_REASONS, daemonUrlOf } from "../core/contracts/constants.ts";
+import { claudeDirOf, claudeUserConfigOf, codexDirOf, copilotDirOf, dataRootOf, geminiDirOf, kiroDirOf, opencodeDirOf } from "../core/project/config-dir.ts";
+import { AGENT_HOME_DIR, CLAUDE_ENTRY_CHECK_DETAIL, D2_NODE_DETAIL, D2_NODE_FIX, D2_SQLITE_DETAIL, D2_SQLITE_FIX, DB_FILE_NAME, DAEMON_CHECK_DOWN_DETAIL, DAEMON_CHECK_FIX, DAEMON_CHECK_PASS_DETAIL, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PROBE_TIMEOUT_MS, MCP_ENV_FIELD, MCP_ENV_VARS_FIELD, MCP_SERVERS_KEY, SETUP_MANIFEST_FILE, NATIVE_INSTALL, OPENCODE_PLUGIN_PATH, PROJECTS_DIR_NAME, SERVER_KEY, TOOL_ORDER, UPGRADE_REPORT_ONLY_REASONS, daemonUrlOf } from "../core/contracts/constants.ts";
 import { daemonConfiguredPort } from "../core/ops/daemon-state.ts";
 import { CtxError, formatError } from "../core/contracts/errors.ts";
 import { nodeTooOld } from "../core/hooks/fallback.ts";
 import { ADAPTERS, getAdapter } from "../adapters/table.ts";
 import type { AgentId, HostConfigFormat, V1Finding } from "../core/contracts/types.ts";
 import { detectV1 } from "../core/ops/detect-v1.ts";
+import { claudeUserMcpEntry } from "../core/ops/claude-entry.ts";
 import { atomicWriteFile, renameWithRetry, unlinkWithRetry } from "../core/ops/atomic-file.ts";
 import { editHostConfigText, hostConfigValueAt, parseHostConfig } from "../core/ops/host-config.ts";
 import { hostLayout, hostText, withLayout } from "../core/ops/host-text.ts";
@@ -349,6 +350,31 @@ function planSkills(row: CheckRow, edits: FileEdit[]): void {
     const before = readRaw(f.file);
     if (before !== after) edits.push({ plain: true, file: f.file, before, after, changes: [{ file: f.file, path: f.name, before: before === undefined ? null : "old", after: "SKILL.md" }] });
   }
+}
+
+/** 2.2.6: remove the user-scope `claude mcp add` entry from ~/.claude.json. Claude Code drops a plugin MCP
+ * server whose URL matches a manually-configured server (verified on the 2.1.322 binary: "Suppressing
+ * plugin MCP server ...: duplicates manually-configured"), so the entry docs/daemon.md once taught — and the
+ * daemon banner printed — disables the claude-code plugin's own daemon entry (2.2.5+), losing its
+ * x-context-mode-session header. ctx_upgrade removes the same entry as a D4 v1 leftover; setup removing it
+ * too is what makes doctor's "old context-mode entry, run: context-mode setup" advice actually land. Only
+ * the plugin install owns this cleanup: non-claude rows never touch ~/.claude.json. */
+function planClaudeUserEntry(row: CheckRow, ctx: SetupContext): FileEdit | undefined {
+  if (row.id !== "claude-code" || row.installMode !== "marketplace") return undefined;
+  const file = claudeUserConfigOf(ctx.env, ctx.home);
+  const before = readOr(file);
+  if (before === undefined) return undefined;
+  let cur: unknown;
+  try { cur = JSON.parse(before); } catch { return undefined; } // the host's own file: never a setup failure
+  const servers = isObj(cur) ? cur[MCP_SERVERS_KEY] : undefined;
+  if (!isObj(servers) || !isObj(servers[SERVER_KEY])) return undefined;
+  const kept = { ...servers };
+  delete kept[SERVER_KEY];
+  let res;
+  try { res = editHostConfigText(row.id, file, before, "json", [[[MCP_SERVERS_KEY], kept]]); }
+  catch (e) { if (e instanceof CtxError) return undefined; throw e; }
+  if (res.edits.length === 0) return undefined;
+  return { file, before, after: res.text, changes: res.edits.map((e) => ({ file, ...e })) };
 }
 
 function planRow(row: CheckRow, listed: boolean, stale: boolean, env: SetupContext["env"], disabled = false): Plan {
@@ -964,6 +990,15 @@ async function enableCopilotHooks(row: CheckRow, ctx: SetupContext, run: Run): P
 }
 const isObjSetup = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
+/** 2.2.6: the claude-code row's claude-entry check. A WARN, never a FAIL (a FAIL rolls the install back):
+ * the entry still serves the daemon, it only costs the plugin's MCP entry and its session header. */
+function claudeEntryCheck(row: CheckRow, ctx: SetupContext): Check | undefined {
+  if (row.id !== "claude-code") return undefined;
+  const entry = claudeUserMcpEntry(ctx.env, ctx.home);
+  if (entry === undefined) return undefined;
+  return { name: "claude-entry", ok: true, warn: true, detail: CLAUDE_ENTRY_CHECK_DETAIL + (entry.url === "" ? "" : ` (${entry.url})`) };
+}
+
 async function verifyRow(row: CheckRow, ctx: SetupContext): Promise<Check[]> {
   const env = ctx.env;
   const checks: Check[] = [parseCheck(row)];
@@ -974,6 +1009,8 @@ async function verifyRow(row: CheckRow, ctx: SetupContext): Promise<Check[]> {
   if (cp) checks.push(cp);
   checks.push(await mcpCheck(row.serverCommand, env));
   if (row.installMode === "marketplace") checks.push(await daemonCheck(env)); // the plugin's MCP entry is the daemon, not the bundle
+  const cc = claudeEntryCheck(row, ctx);
+  if (cc) checks.push(cc); // 2.2.6: a manual entry that suppresses the plugin's MCP entry survives only when the plan could not edit ~/.claude.json
   if (row.hookCommand) checks.push(hookCheck(row, env));
   checks.push(hookRegisteredCheck(row, env, l));
   const en = hookEnabledCheck(row, ls.status);
@@ -1118,6 +1155,8 @@ async function setupRow(row: CheckRow, ctx: SetupContext, run: Run, dryRun: bool
     if (ls.broken) return { ...res, status: "SKIPPED", reason: ls.broken };
     const listed = ls.check?.ok === true;
     plan = planRow(row, listed, copyCheck(row, ctx.pkgDir)?.ok === false, ctx.env, listed && ls.status === "disabled");
+    const claudeEntry = planClaudeUserEntry(row, ctx);
+    if (claudeEntry) plan.edits.push(claudeEntry);
   } catch (e) { return { ...res, status: "FAIL", reason: (e as Error).message }; }
   // The config entry is current when the plan changes nothing in that file but codex trust entries.
   const configEdited = (file: string): boolean => plan.edits.some((e) => e.file === file && e.changes.some((c) => !isTrust(row, c)));

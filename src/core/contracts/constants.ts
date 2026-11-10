@@ -183,6 +183,9 @@ export const DAEMON_AGENT_HEADER = "x-context-mode-agent"; // same route for the
 export const DAEMON_SESSION_HEADER = "x-context-mode-session"; // the HOST session id (e.g. claude-code's CLAUDE_CODE_SESSION_ID), when the client can set per-session headers: matches the id its hooks journal under, so scope:"session" sees hook-indexed rows
 export const DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}`; // default; the port may differ
 export function daemonUrlOf(port: number): string { return `http://${DAEMON_HOST}:${port}${DAEMON_PATH}`; }
+// 2.2.6: for the claude-code PLUGIN this entry is now the wrong move — a manual server with the daemon's
+// URL suppresses the plugin's own MCP entry (see CLAUDE_ENTRY_CHECK_DETAIL); DAEMON_ADD_CAVEAT says so
+// wherever this line is printed. It stays for a claude-code install without the plugin.
 export function DAEMON_ADD_COMMAND(url: string): string { return `claude mcp add --transport http context-mode ${url}`; }
 export const DAEMON_UNIT_NAME = "context-mode-daemon.service"; // systemd user unit written by `context-mode daemon --install`
 export const DAEMON_UNIT_DIR = ["systemd", "user"]; // under $HOME/.config: paths are filled by --install, never typed by hand
@@ -536,6 +539,18 @@ export const DAEMON_CHECK_FIX = "context-mode daemon --install"; // installs and
 export const DAEMON_CHECK_PASS_DETAIL = "shared daemon reachable"; // + " at <url>"
 export const DAEMON_CHECK_SELF_DETAIL = "this process is the shared daemon"; // the daemon's own row
 export const DAEMON_CHECK_DOWN_DETAIL = "no daemon answers on the configured port";
+// 2.2.6 D13 "claude-entry": Claude Code drops a plugin MCP server whose URL matches a manually-configured
+// server (the dedup prints "Suppressing plugin MCP server ...: duplicates manually-configured", verified on
+// the 2.1.322 binary), so a user-scope `claude mcp add --transport http context-mode <daemon-url>` — the
+// pre-plugin connect step docs/daemon.md taught and the daemon banner printed — silently disables the
+// plugin's daemon entry (and its x-context-mode-session header). The row appears only when the entry exists.
+export const CLAUDE_ENTRY_CHECK_ID = "D13";
+export const CLAUDE_ENTRY_CHECK_LABEL = "claude-entry";
+export const CLAUDE_ENTRY_CHECK_DETAIL = "user-scope claude-code MCP entry mcpServers.context-mode in ~/.claude.json duplicates the plugin's daemon URL, so Claude Code drops the plugin's MCP entry (and its session header)"; // + "; " + entry url when known
+export const CLAUDE_ENTRY_CHECK_FIX = "claude mcp remove context-mode -s user"; // setup and ctx_upgrade remove it too
+// The daemon's connect line kept teaching `claude mcp add` after the plugin shipped its own daemon entry
+// (2.2.5): every user who copied it re-created the suppressing entry. Printed right after the add command.
+export const DAEMON_ADD_CAVEAT = "claude-code plugin: its MCP entry is this URL already — a manual `claude mcp add` of the same URL makes Claude Code drop the plugin's entry (remove: claude mcp remove context-mode -s user)";
 export const HOOK_FIXTURE_DIR = "fixtures"; // impl/00 §1 file tree: <bundle>/fixtures/hook-roundtrip.json (D-M5-arch-4)
 export const HOOK_FIXTURE_FILE = "hook-roundtrip.json"; // D5 fixture, one JSON object keyed by agent id
 export const HOOK_ENTRY_FILE = "hook.mjs"; // D5 runs this next to the server bundle (D-M3-arch-3)

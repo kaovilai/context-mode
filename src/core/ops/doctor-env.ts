@@ -11,17 +11,19 @@ import {
   D10_DETAIL, D10_PERMISSION_DETAIL, D10_PERMISSION_FIX, D10_PERMISSION_MISSING_DETAIL, D11_PASS_DETAIL, D11_POSIX_DETAIL, D11_POSIX_FIX, D11_WIN_DETAIL, D11_WIN_FIX, D2_BUN_DETAIL, D2_NODE_DETAIL, D2_NODE_FIX,
   D2_SQLITE_DETAIL, D2_SQLITE_FIX, D4_REASON_JOIN, D6_IN_PROCESS_DETAIL, D6_UNKNOWN_DETAIL, D7_DETAIL, D7_FIX, DAEMON_CHECK_DOWN_DETAIL, DAEMON_CHECK_FIX,
   DAEMON_CHECK_LABEL, DAEMON_CHECK_PASS_DETAIL, DAEMON_CHECK_SELF_DETAIL, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PROBE_TIMEOUT_MS,
+  CLAUDE_ENTRY_CHECK_DETAIL, CLAUDE_ENTRY_CHECK_FIX, CLAUDE_ENTRY_CHECK_LABEL,
   DOCTOR_FIX_UPGRADE, DOCTOR_GIT_TIMEOUT_MS, DOCTOR_LABEL, DOCTOR_PASS_DETAIL, GIT_BIN, GIT_LS_REMOTE, GIT_LS_REMOTE_TAG_ARGS, GIT_NO_PROMPT_ENV, GIT_SHA_HEX_LEN,
   LS_REMOTE_FIELD_SEP, NODE_MIN, NODE_VERSION_PREFIX, NODE_VERSION_SEP, RELEASE_REPO_URL, RELEASE_TAG_PATTERN, RELEASE_TAG_REF_PREFIX,
   SQLITE_MODULE, daemonUrlOf,
 } from "../contracts/constants.ts";
 import { daemonCheckWanted, daemonConfiguredPort, daemonSelfPort } from "./daemon-state.ts";
+import { claudeUserMcpEntry } from "./claude-entry.ts";
 import type { AdapterRow, DoctorCheckId, DoctorRow, HostPermission, ProjectContext, ToolContext } from "../contracts/types.ts";
 import { findRuntime } from "../sandbox/runtimes.ts";
 import { runProcess, type RunResult } from "../sandbox/spawn.ts";
 
 // The ordered rows only: D12 (ADR-0026) builds its row itself, outside DOCTOR_CHECK_ORDER.
-type OrderCheckId = Exclude<DoctorCheckId, "D12">;
+type OrderCheckId = Exclude<DoctorCheckId, "D12" | "D13">;
 function pass(id: OrderCheckId, detail: string = DOCTOR_PASS_DETAIL): DoctorRow {
   return { id, label: DOCTOR_LABEL[id], status: "PASS", detail };
 }
@@ -314,4 +316,16 @@ export async function checkDaemon(env: NodeJS.ProcessEnv): Promise<DoctorRow | u
   } catch {
     return row("FAIL", `${DAEMON_CHECK_DOWN_DETAIL} ${daemonUrlOf(port)}`, DAEMON_CHECK_FIX);
   }
+}
+
+// 2.2.6 D13 "claude-entry": like D12, outside DOCTOR_CHECK_ORDER and carrying its own label; the row appears
+// only when ~/.claude.json holds a user-scope context-mode MCP entry, so the default report is unchanged.
+// A WARN, never a FAIL: the manual entry still serves the daemon, it only costs the plugin entry (and its
+// session header) — but the fix is one command, so the row says it.
+export function checkClaudeEntry(env: NodeJS.ProcessEnv, home: string | null): DoctorRow | undefined {
+  if (home === null) return undefined;
+  const entry = claudeUserMcpEntry(env, home);
+  if (entry === undefined) return undefined;
+  const url = entry.url === "" ? "" : ` (${entry.url})`;
+  return { id: "D13", label: CLAUDE_ENTRY_CHECK_LABEL, status: "WARN", detail: CLAUDE_ENTRY_CHECK_DETAIL + url, fixCommand: CLAUDE_ENTRY_CHECK_FIX };
 }

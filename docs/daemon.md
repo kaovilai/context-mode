@@ -40,11 +40,25 @@ context-mode daemon
 
 ## Point one agent at it
 
-Copy the command the daemon printed at startup, or print it again:
+**With the Claude Code plugin (2.2.5+): do nothing.** The plugin's own MCP entry is the daemon's URL
+(`http://127.0.0.1:${CONTEXT_MODE_DAEMON_PORT:-8790}/mcp`) and sends the session header — no `claude mcp
+add` is needed. Worse, one is harmful: Claude Code drops a plugin MCP server whose URL matches a
+manually-configured server (the 2.1.322 binary logs `Suppressing plugin MCP server
+"plugin:context-mode:context-mode": duplicates manually-configured "context-mode"`), so a manual entry
+with this URL silently disables the plugin's entry — and with it the `x-context-mode-session` header the
+hooks' session continuity needs. An older install or the pre-plugin docs may have left that entry behind;
+the daemon banner, `ctx_doctor` (row `D13 claude-entry`) and `context-mode setup` all name it. Remove it:
 
 ```sh
-context-mode daemon --print-command
+claude mcp remove context-mode -s user
 ```
+
+`context-mode setup --agents claude-code` removes the entry too (it is also a D4 "old MCP entry"
+leftover that `ctx_upgrade` clears), and `claude mcp remove context-mode -s project` clears a project-scope
+copy that suppresses the plugin entry the same way.
+
+Without the plugin — a bare Claude Code that should still reach the daemon — the connect command is what
+the daemon prints (`context-mode daemon --print-command`; the line after it is the caveat above):
 
 ```sh
 claude mcp add --transport http context-mode http://127.0.0.1:8790/mcp
@@ -60,7 +74,9 @@ claude mcp remove context-mode
 
 Sessions of different projects share the daemon. A session that sends no workspace itself names its
 project in a header (run the command in the repo root; `claude mcp remove context-mode` first if the
-entry above exists):
+entry above exists; with the plugin installed, a project-scope entry with the daemon URL suppresses the
+plugin's entry exactly like a user-scope one, and Claude Code names the workspace through `roots/list`
+anyway — A26-r14 — so the plugin needs none of this):
 
 ```sh
 claude mcp add --scope project --transport http context-mode \
@@ -97,7 +113,10 @@ Two consequences to know:
   expansion (the value is the process's session id, the same one its hooks report; an unexpanded
   header value is rejected by the daemon's id validation and falls back to the connection id). A
   hand-added `claude mcp add` entry has static headers, so there the session-scoped hook continuity
-  still needs a per-session header or the stdio spawn; project scope is unaffected either way.
+  still needs a per-session header or the stdio spawn; project scope is unaffected either way. And a
+  hand-added entry whose URL is the daemon's replaces the plugin's entry outright (Claude Code's
+  same-URL dedup; see *Point one agent at it*), so on a plugin install the entry is a loss on both
+  counts — remove it rather than keep it next to the plugin.
 - **Shared hosts:** loopback is not user-isolated — another OS user on the machine can also
   reach the port and call `ctx_execute` with the daemon owner's permissions, a broader exposure
   than spawning a stdio server as their own user. Do not run the daemon on a shared host without

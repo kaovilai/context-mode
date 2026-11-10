@@ -105,3 +105,33 @@ session A's indexed content, `scope: "session"` does not; `ps` shows exactly one
 within the test bound across 4 further sessions; D12 PASS in the daemon and FAIL + fix on a dead
 configured port; `server.mjs` still speaks stdio with no flags. Suite green (tests/0026 + the
 pre-existing files unchanged).
+
+## Addendum (2.2.6): the manual entry suppresses the plugin entry
+
+Shipped 2.2.5 connected the plugin but silently did not load it on machines that had followed the
+pre-plugin connect step (`claude mcp add --transport http context-mode <daemon-url>`, taught by
+docs/daemon.md and printed by the daemon banner). Root cause, verified against the Claude Code
+2.1.322 binary: the client dedupes plugin MCP servers against manually-configured servers by
+normalized URL (headers are not part of the signature) and keeps the manual one — the debug log
+reads `Suppressing plugin MCP server "plugin:context-mode:context-mode": duplicates
+manually-configured "context-mode"`, and with the user-scope entry removed the plugin entry loads
+and its tools appear as `mcp__plugin_context-mode_context-mode__*`. A stdio plugin entry never hit
+this (its signature is the command line), which is why 2.2.4 loaded next to the same manual entry.
+
+Decision: the URL stays the daemon's (dodging the dedup with a `localhost` spelling would double
+every connection); the manual entry is the thing to remove. 2.2.6:
+
+- `ctx_doctor` gains `D13 claude-entry` (like D12, outside the fixed order, present only when
+  `~/.claude.json` holds a user-scope `mcpServers.context-mode` entry): WARN with the fix
+  `claude mcp remove context-mode -s user`.
+- `context-mode setup --agents claude-code` removes the entry (the plan edits `~/.claude.json`;
+  ctx_upgrade already removed it as a D4 v1 leftover — setup doing the same is what makes doctor's
+  "old context-mode entry, run: context-mode setup" advice land).
+- The daemon banner and `--print-command` print a caveat line right after the add command, and
+  docs/daemon.md, docs/install/claude-code.md and the README stop teaching the add for plugin
+  installs.
+
+Checked 2026-11-10 on the fork: with the user-scope entry present, a fresh `claude -p` session from
+/tmp shows no `mcp__plugin_context-mode_*` tools and `--debug` logs the suppression line; after
+`claude mcp remove context-mode -s user` the same session lists all `ctx_*` tools under the plugin
+prefix (Claude Code 2.1.322, plugin 2.2.5).

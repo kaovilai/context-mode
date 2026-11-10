@@ -431,6 +431,32 @@ exit 0`;
     const codex = await runSetup({ home: s.home, pkgDir: s.pkgDir, env: { ...s.env, CONTEXT_MODE_DAEMON_PORT: String(deadPort) }, agents: ["codex"], runId: "d3" });
     assert.equal(codex.agents[0].checks.some((c) => c.name === "daemon"), false, "non-marketplace rows keep no daemon row");
   });
+  // 2.2.6 D-CC-MCP-SUPPRESS-1: a user-scope `claude mcp add` entry with the daemon URL makes Claude Code drop
+  // the plugin's MCP entry, so setup removes it from ~/.claude.json (other servers stay); doctor fails on it
+  // first, which is what makes the "run: context-mode setup" advice land.
+  test("[claude-entry] setup removes the user-scope claude mcp add entry that suppresses the plugin's MCP entry", { skip: process.platform === "win32" && "fake agent binaries are sh scripts" }, async (t) => {
+    const s = sandbox(t);
+    fakeClaude(s.root, s.bin, CLAUDE_FAKE(path.join(s.root, "claude.state")));
+    const userConfig = put(path.join(s.home, ".claude.json"), JSON.stringify({
+      numStartups: 3,
+      mcpServers: {
+        "context-mode": { type: "http", url: "http://127.0.0.1:8790/mcp" },
+        "another-server": { type: "http", url: "http://127.0.0.1:9999/mcp" },
+      },
+    }, null, 2) + "\n");
+    const opts = { home: s.home, pkgDir: s.pkgDir, env: s.env, agents: ["claude-code"] };
+    const before = await runDoctor(opts);
+    assert.equal(before.agents[0].status, "FAIL", JSON.stringify(before.agents[0], null, 2));
+    const res = await runSetup({ ...opts, runId: "ce1" });
+    assert.equal(res.agents[0].status, "PASS", JSON.stringify(res.agents[0], null, 2));
+    const after = JSON.parse(readFileSync(userConfig, "utf8"));
+    assert.equal(after.mcpServers["context-mode"], undefined, "the suppressing entry is gone");
+    assert.deepEqual(after.mcpServers["another-server"], { type: "http", url: "http://127.0.0.1:9999/mcp" }, "other servers stay");
+    assert.equal(after.numStartups, 3, "the host's own keys stay");
+    assert.ok(res.agents[0].changes.some((c) => c.path === "mcpServers" && c.before && c.before["context-mode"] && !c.after["context-mode"]), JSON.stringify(res.agents[0].changes));
+    const clean = await runDoctor(opts);
+    assert.equal(clean.agents[0].status, "PASS", JSON.stringify(clean.agents[0], null, 2));
+  });
 
   test("[H8] setup: only a shim on PATH is a FAIL that names the shim; the shim never runs", { skip: process.platform === "win32" && "fake agent binaries are sh scripts" }, async (t) => {
     const s = sandbox(t);

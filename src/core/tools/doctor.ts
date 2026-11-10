@@ -7,7 +7,7 @@ import { basename, dirname, join } from "node:path";
 import { z } from "zod/v4";
 import { getAdapter } from "../../adapters/table.ts";
 import {
-  D5_LAST_HOOK_ERROR, D5_PAST_HOOK_ERROR, DAEMON_CHECK_LABEL, DOCTOR_CHECK_ORDER, DOCTOR_DOCS_LABEL, DOCTOR_DOCS_LINK, DOCTOR_LABEL, OWNER_PID_EXT, OWNERS_DIR_NAME,
+  D5_LAST_HOOK_ERROR, D5_PAST_HOOK_ERROR, DAEMON_CHECK_LABEL, CLAUDE_ENTRY_CHECK_LABEL, DOCTOR_CHECK_ORDER, DOCTOR_DOCS_LABEL, DOCTOR_DOCS_LINK, DOCTOR_LABEL, OWNER_PID_EXT, OWNERS_DIR_NAME,
   NATIVE_INSTALL, PI_LIST_COMMAND, PROJECTS_DIR_NAME, REPORT_ENV_ENUMS, BUNDLE_SHA, D1_REGISTRY_URL, DOCTOR_GIT_TIMEOUT_MS, REPORT_CAP, REPORT_SOURCE_LABEL,
 } from "../contracts/constants.ts";
 import { CtxError } from "../contracts/errors.ts";
@@ -18,7 +18,7 @@ import { ownBundleDir } from "../ops/bundle-dir.ts";
 import { checkDoubleFire, checkHostConfig, checkV1Leftovers } from "../ops/doctor-config.ts";
 import { checkDb, checkIndex } from "../ops/doctor-db.ts";
 import type { DbCheck } from "../ops/doctor-db.ts";
-import { bundleVersion, checkDaemon, checkMcp, checkMode, checkNode, checkProject, checkShell, checkVersion } from "../ops/doctor-env.ts";
+import { bundleVersion, checkClaudeEntry, checkDaemon, checkMcp, checkMode, checkNode, checkProject, checkShell, checkVersion } from "../ops/doctor-env.ts";
 import { checkHookRoundTrip } from "../ops/doctor-hook.ts";
 import { lastHookError } from "../hooks/fallback.ts";
 import { healD8, healOrphan } from "../ops/db-heal.ts";
@@ -51,7 +51,7 @@ function lineOf(err: unknown): string {
 }
 
 // ADR-0010 "doctor always answers": a check that throws is reported as UNKNOWN with its cause (D-M5-D6-2).
-async function guard(id: Exclude<DoctorCheckId, "D12">, run: () => DoctorRow | Promise<DoctorRow>): Promise<DoctorRow> {
+async function guard(id: Exclude<DoctorCheckId, "D12" | "D13">, run: () => DoctorRow | Promise<DoctorRow>): Promise<DoctorRow> {
   try {
     return await run();
   } catch (err) {
@@ -123,7 +123,7 @@ export async function runDoctorChecks(ctx: ToolContext, adapter: AdapterRow, hos
   const other = adapter.installMode === "in-process" ? undefined : unsupportedHostOf({ clientName: ctx.clientInfo?.name, bundleDir: host.bundleDir, env }); // D-UNSUPPORTED-HOSTS-1: the host is known and not supported; Pi and OpenCode run in process, so a terminal env var (CURSOR_TRACE_ID) never names another host
   let integrityFailed = false;
   let orphan: DbCheck["orphan"] = [];
-  const checks: Record<Exclude<DoctorCheckId, "D12">, () => DoctorRow | Promise<DoctorRow>> = {
+  const checks: Record<Exclude<DoctorCheckId, "D12" | "D13">, () => DoctorRow | Promise<DoctorRow>> = {
     D1: () => checkVersion({ bundleSha: BUNDLE_SHA, version: bundleVersion(host.bundleDir), registryUrl: D1_REGISTRY_URL, timeoutMs: DOCTOR_GIT_TIMEOUT_MS, env: buildChildEnv(env), cwd: project.worktree, signal: ctx.signal, updateCommand: d1UpdateCommand(adapter.id, env, other) }),
     D2: () => checkNode({ nodeVersion: process.version, bunVersion: process.versions.bun }),
     D3: () => other !== undefined ? unsupportedRow("D3", other) : checkHostConfig(adapter, env, project.worktree), // D-UNSUPPORTED-HOSTS-1
@@ -153,6 +153,15 @@ export async function runDoctorChecks(ctx: ToolContext, adapter: AdapterRow, hos
     daemonRow = { id: "D12", label: DAEMON_CHECK_LABEL, status: "UNKNOWN", detail: lineOf(err) };
   }
   if (daemonRow !== undefined) rows.push(daemonRow);
+  // 2.2.6 D13: appended after D12, only when ~/.claude.json holds the user-scope entry (a WARN with the
+  // one-command fix; a clean machine shows no row, so the default report stays unchanged).
+  let claudeEntryRow: DoctorRow | undefined;
+  try {
+    claudeEntryRow = checkClaudeEntry(env, homeDirOf(env));
+  } catch (err) {
+    claudeEntryRow = { id: "D13", label: CLAUDE_ENTRY_CHECK_LABEL, status: "UNKNOWN", detail: lineOf(err) };
+  }
+  if (claudeEntryRow !== undefined) rows.push(claudeEntryRow);
   const at = DOCTOR_CHECK_ORDER.indexOf("D8");
   // D-ORPHAN-WAL-1: a missing context.db with its WAL left: move the WAL files aside, start a new index.
   if (orphan.length > 0) {

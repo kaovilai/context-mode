@@ -2075,6 +2075,27 @@ describe("ADR-0010 ctx_doctor tool: all checks and order", { concurrency: CONC }
     assert.deepEqual(rows.map((r) => r.id), ORDER);
   });
 
+  // 2.2.6 D-CC-MCP-SUPPRESS-1: a user-scope `claude mcp add` entry with the daemon URL makes Claude Code
+  // drop the plugin's MCP entry, so ctx_doctor shows D13 (WARN, one-command fix) only when it exists.
+  test("[D13] claude-entry row: WARN with the removal fix when ~/.claude.json holds the entry, no row when clean", async (t) => {
+    const home = tmp(t);
+    put(path.join(home, ".claude.json"), { mcpServers: { "context-mode": { type: "http", url: "http://127.0.0.1:8790/mcp" } } });
+    const { rows } = await doctor(home);
+    assert.deepEqual(rows.map((r) => r.id), [...ORDER, "D13"]);
+    const row = rows.find((r) => r.id === "D13");
+    assert.equal(row.status, "WARN");
+    assert.equal(row.label, "claude-entry");
+    assert.equal(row.fixCommand, "claude mcp remove context-mode -s user");
+    assert.match(row.detail, /duplicates the plugin's daemon URL/);
+    assert.match(row.detail, /http:\/\/127\.0\.0\.1:8790\/mcp/);
+    const clean = await doctor(tmp(t));
+    assert.equal(clean.rows.some((r) => r.id === "D13"), false, "no row on a clean machine");
+    // An unparseable ~/.claude.json is the host's own file: no row, never an error.
+    const broken = tmp(t);
+    put(path.join(broken, ".claude.json"), "{not json");
+    assert.equal((await doctor(broken)).rows.some((r) => r.id === "D13"), false);
+  });
+
   test("[M5] doctor/D8-stale-schema-and-integrity-check-are-distinct-detail-strings", async (t) => {
     const home = tmp(t);
     const { ctx } = await doctor(home);
