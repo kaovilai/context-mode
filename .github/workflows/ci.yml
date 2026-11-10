@@ -63,7 +63,7 @@ jobs:
       # ADR-0019 D3: the one hook overhead gate (warm-up, lowest of 5 batch p95 values, 15 ms), all three OSes
       # (DEVIATIONS D-CI-PERF-1, D-CI-PERF-5). It also prints the cold first call of a fresh bundle copy as info.
       - run: node e2e/checks/setup-hook-overhead.mjs
-        name: D3 hook overhead p95 <= 15 ms (perf check; cold first call is info)
+        name: D3 hook overhead p95 <= 15 ms (20 on windows node 24; perf check; cold first call is info)
         # FORK ONLY: windows + node 24.15.0 measures the gate at exactly the 15 ms budget even on green
         # runs (700c74e7: 15/15; 2ab139cd: 16 fail then green on rerun), while node 26 measures 9-11 ms.
         # Same CI-only knob src/setup/engine.ts reads (overheadBudgetMs), set only for that combo:
