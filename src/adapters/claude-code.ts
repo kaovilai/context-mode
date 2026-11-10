@@ -5,6 +5,14 @@ import type { CanonicalEventName, CanonicalHookEvent, Decision, HookOutput, Tool
 
 export const TOOL_NAME_PREFIX = "mcp__plugin_context-mode_context-mode__"; // impl/10 §1.3, TECH-SPEC §3.8 (plugin install)
 
+// A user-scope or project-scope `claude mcp add context-mode` (or a host that registers the server under its
+// plain name, e.g. T3 Code) surfaces the same tools as mcp__context-mode__<tool> — the qwen/zcode form.
+// Both name this server's own tools, so both must strip to the bare ctx_* canonical name; with only the
+// plugin prefix, a plain MCP install decoded to mcp:context-mode:ctx_execute, the own-tool exemption
+// (dispatch step 1, ADR-0009 §0) missed it, and the hook replaced its own ctx_search/ctx_execute replies
+// with pointers to themselves (the "mangled search tool" loop).
+export const USER_MCP_TOOL_NAME_PREFIX = "mcp__context-mode__";
+
 // D-CC-PWSH-1 (#1212): Claude Code 2.1.274 binary: `var Gt="PowerShell"`, input schema {command: "The PowerShell command
 // to execute", timeout?, description?, run_in_background?, dangerouslyDisableSandbox?}, output {stdout, stderr, interrupted, ...}
 // (the Bash shapes). Enabled on Windows (CLAUDE_CODE_USE_POWERSHELL_TOOL). It is the same canonical shell as Bash.
@@ -241,7 +249,14 @@ function requireFields(raw: unknown): void {
 
 export function decode(raw: unknown): CanonicalHookEvent {
   requireFields(raw);
-  const ev = decodeClaudeShape(raw, "claude-code", TOOL_NAME_PREFIX, CLAUDE_SOURCES);
+  // The plugin install and a plain `claude mcp add context-mode` name the same tools with different mcp__
+  // prefixes, so the own prefix follows the tool name (the zcode dual-prefix pattern, D-R44-ZCODE-NATIVE-1).
+  // The payload is read defensively: a non-object raw keeps decodeClaudeShape's own "hook payload is not a
+  // JSON object" line (a bare .tool_name read would throw first and replace it with a TypeError).
+  const p = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const toolName = typeof p.tool_name === "string" ? p.tool_name : "";
+  const ownPrefix = toolName.startsWith(USER_MCP_TOOL_NAME_PREFIX) ? USER_MCP_TOOL_NAME_PREFIX : TOOL_NAME_PREFIX;
+  const ev = decodeClaudeShape(raw, "claude-code", ownPrefix, CLAUDE_SOURCES);
   // D-CC-PWSH-1: PowerShell keeps its native name and is decided, replaced and encoded as canonical Bash.
   if (ev.tool !== undefined && ev.tool.name === POWERSHELL_TOOL) ev.tool.canonicalName = SHELL_CANONICAL;
   // D-FU-RF-DECODE-1 defaults. cwd: the project dir Claude Code sets for its hooks, else the hook's own cwd.

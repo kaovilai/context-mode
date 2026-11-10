@@ -169,6 +169,31 @@ export const RUN_SESSION_PREFIX = "mcp:"; // §4 step 5, 00 A8: no MCP _meta, + 
 // Claude Code 2.1.303 sets CLAUDE_CODE_SESSION_ID (probe: equals the hook payload session_id). A host not listed keeps mcp:<serverId>.
 export const HOST_SESSION_ENV: Readonly<Partial<Record<string, string>>> = Object.freeze({ "claude-code": "CLAUDE_CODE_SESSION_ID" });
 
+// Shared daemon (ADR-0026). One process serves every session over loopback Streamable HTTP; the stdio
+// spawn stays the default and is byte-identical when no daemon flag or env is present.
+export const DAEMON_HOST = "127.0.0.1"; // loopback only: the daemon has no inbound auth
+export const DAEMON_DEFAULT_PORT = 8790; // no known clash on a dev machine (jupyter 8888, mcp-proxy 18090)
+export const DAEMON_PORT_ENV = "CONTEXT_MODE_DAEMON_PORT"; // set and a valid port: overrides the default, opts ctx_doctor D12 in
+export const DAEMON_PATH = "/mcp"; // the Streamable HTTP endpoint
+export const DAEMON_HEALTH_PATH = "/healthz"; // liveness probe: 204, no MCP traffic
+// ADR-0026 step 2b: the daemon resolves the project per request; a client that sends no _meta workspace
+// (Codex sandboxCwd) and answers no roots/list names the workspace in this header (claude mcp add --header).
+export const DAEMON_WORKSPACE_HEADER = "x-context-mode-workspace";
+export const DAEMON_AGENT_HEADER = "x-context-mode-agent"; // same route for the agent id, when the client name is unknown
+export const DAEMON_SESSION_HEADER = "x-context-mode-session"; // the HOST session id (e.g. claude-code's CLAUDE_CODE_SESSION_ID), when the client can set per-session headers: matches the id its hooks journal under, so scope:"session" sees hook-indexed rows
+export const DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}`; // default; the port may differ
+export function daemonUrlOf(port: number): string { return `http://${DAEMON_HOST}:${port}${DAEMON_PATH}`; }
+export function DAEMON_ADD_COMMAND(url: string): string { return `claude mcp add --transport http context-mode ${url}`; }
+export const DAEMON_UNIT_NAME = "context-mode-daemon.service"; // systemd user unit written by `context-mode daemon --install`
+export const DAEMON_UNIT_DIR = ["systemd", "user"]; // under $HOME/.config: paths are filled by --install, never typed by hand
+export const DAEMON_PROBE_TIMEOUT_MS = 1500; // D12 reachability probe budget
+// A26-r14: the 2026-07-28 era's negotiation probe. A client that sends it AND declares the roots
+// capability in its _meta is steered to the 2025-era sessionful leg (see daemon.ts discoverSteer):
+// on the per-request-envelope era the SDK cannot deliver roots/list, so decision 3's roots-based
+// workspace resolution would never run for such a client.
+export const DISCOVER_METHOD = "server/discover";
+export const CLIENT_CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities"; // a discover probe's declared client capabilities
+
 // Runtime
 export const NODE_MIN = "24.15.0"; // S-NODE
 export const DATA_ROOT = "~/.context-mode"; // PRD §4; the store module expands "~"
@@ -502,6 +527,15 @@ export const DOCTOR_LABEL: Readonly<Record<(typeof DOCTOR_CHECK_ORDER)[number], 
   D1: "version", D2: "node", D3: "host config", D4: "old entries", D5: "hook round trip", D5b: "double-fire",
   D6: "MCP", D7: "project and worktree", D8: "context.db", D9: "index", D10: "enforcement mode", D11: "shell",
 });
+// ADR-0026 D12 "daemon": outside DOCTOR_CHECK_ORDER on purpose — the row appears only when this process is the
+// daemon, or CONTEXT_MODE_DAEMON_PORT is set (the opt-in signal); a plain stdio session shows no D12 row at all,
+// so the default report stays byte-identical (ADR-0026 decision 5).
+export const DAEMON_CHECK_ID = "D12";
+export const DAEMON_CHECK_LABEL = "daemon";
+export const DAEMON_CHECK_FIX = "context-mode daemon --install"; // installs and starts the systemd user unit
+export const DAEMON_CHECK_PASS_DETAIL = "shared daemon reachable"; // + " at <url>"
+export const DAEMON_CHECK_SELF_DETAIL = "this process is the shared daemon"; // the daemon's own row
+export const DAEMON_CHECK_DOWN_DETAIL = "no daemon answers on the configured port";
 export const HOOK_FIXTURE_DIR = "fixtures"; // impl/00 §1 file tree: <bundle>/fixtures/hook-roundtrip.json (D-M5-arch-4)
 export const HOOK_FIXTURE_FILE = "hook-roundtrip.json"; // D5 fixture, one JSON object keyed by agent id
 export const HOOK_ENTRY_FILE = "hook.mjs"; // D5 runs this next to the server bundle (D-M3-arch-3)

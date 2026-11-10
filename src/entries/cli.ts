@@ -21,6 +21,7 @@ const EXIT_USAGE = 2;
 const EXIT_SIGINT = 130;
 const SERVER_FILE = "server.mjs";
 const HOOK_FILE = "hook.mjs";
+const DAEMON_FILE = "daemon.mjs"; // ADR-0026: the shared daemon bundle, next to this file like the other two
 const PACKAGE_FILE = "package.json";
 
 // D4: v1 `context-mode hook <platform> <event>` platform names (https://github.com/mksglu/context-mode/blob/274600e2ffab843e89c1dfa09b0d649e650c962f/docs/v2/spikes/setup/S-V1.md) -> v2 agent id.
@@ -52,6 +53,7 @@ export function route(argv: readonly string[], version: string): Route {
   if (cmd === undefined || cmd === "-h" || cmd === "--help" || cmd === "help") return { kind: "exit", code: EXIT_OK, stdout: HELP };
   if (cmd === "-v" || cmd === "--version") return { kind: "exit", code: EXIT_OK, stdout: version + "\n" };
   if (cmd === "server" || cmd === "mcp") return { kind: "run", file: SERVER_FILE, args: rest };
+  if (cmd === "daemon") return { kind: "run", file: DAEMON_FILE, args: rest }; // ADR-0026: opt-in shared daemon
   if (cmd === "hook") {
     if (rest.includes(AGENT_ARG)) return { kind: "run", file: HOOK_FILE, args: rest };
     const [platform = ""] = rest;

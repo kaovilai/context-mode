@@ -6,10 +6,7 @@ var __export = (target, all) => {
 };
 
 // src/entries/server.ts
-import { randomUUID } from "node:crypto";
-import { existsSync as existsSync23, realpathSync as realpathSync12, rmSync as rmSync9 } from "node:fs";
-import { dirname as dirname13, join as join23 } from "node:path";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create = Object.create;
@@ -27550,9 +27547,6 @@ function unwrapOptionalSchema(schema) {
   return schema.def?.innerType ?? schema;
 }
 
-// node_modules/@modelcontextprotocol/server/dist/index.mjs
-var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
-
 // node_modules/@modelcontextprotocol/server/dist/stdio.mjs
 var swallowsErrorsAfterClose = Symbol("swallowsErrorsAfterClose");
 var StdioServerTransport = class {
@@ -28051,9 +28045,6 @@ function toError(value) {
   return value instanceof Error ? value : new Error(String(value));
 }
 
-// src/core/contracts/agents.ts
-var AGENT_IDS = ["claude-code", "codex", "gemini", "qwen", "copilot-cli", "vscode", "kiro", "zcode", "pi", "opencode"];
-
 // src/core/contracts/constants.ts
 var SERVER_KEY = "context-mode";
 var TOOL_ORDER = Object.freeze(["ctx_execute", "ctx_batch", "ctx_index", "ctx_search", "ctx_resume", "ctx_stats", "ctx_doctor", "ctx_upgrade", "ctx_purge"]);
@@ -28264,6 +28255,16 @@ var PLAIN_OUTPUT_ENV = Object.freeze({ NO_COLOR: "1", FORCE_COLOR: "0" });
 var RUN_LABEL_PREFIX = "run.mjs:";
 var RUN_SESSION_PREFIX = "mcp:";
 var HOST_SESSION_ENV = Object.freeze({ "claude-code": "CLAUDE_CODE_SESSION_ID" });
+var DAEMON_HOST = "127.0.0.1";
+var DAEMON_DEFAULT_PORT = 8790;
+var DAEMON_PORT_ENV = "CONTEXT_MODE_DAEMON_PORT";
+var DAEMON_PATH = "/mcp";
+var DAEMON_HEALTH_PATH = "/healthz";
+var DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}`;
+function daemonUrlOf(port) {
+  return `http://${DAEMON_HOST}:${port}${DAEMON_PATH}`;
+}
+var DAEMON_PROBE_TIMEOUT_MS = 1500;
 var NODE_MIN = "24.15.0";
 var DATA_ROOT = "~/.context-mode";
 var DATA_DIR_ENV = "CONTEXT_MODE_DATA_DIR";
@@ -28446,7 +28447,7 @@ function PURGE_SUMMARY(rows, scope) {
 var DECISION_SOURCE = "decision";
 var DECISION_USER_LABEL = "decision (user)";
 var RELEASE_REPO_URL = "https://github.com/mksglu/context-mode.git";
-var BUNDLE_SHA = true ? "5539b632975049a99de986448417a10bd246e506" : void 0;
+var BUNDLE_SHA = true ? "2ab139cda78d4252e6fcb342ff711bf94f1e9232" : void 0;
 var DOCTOR_CHECK_ORDER = Object.freeze(["D1", "D2", "D3", "D4", "D5", "D5b", "D6", "D7", "D8", "D9", "D10", "D11"]);
 var DOCTOR_LABEL = Object.freeze({
   D1: "version",
@@ -28462,6 +28463,11 @@ var DOCTOR_LABEL = Object.freeze({
   D10: "enforcement mode",
   D11: "shell"
 });
+var DAEMON_CHECK_LABEL = "daemon";
+var DAEMON_CHECK_FIX = "context-mode daemon --install";
+var DAEMON_CHECK_PASS_DETAIL = "shared daemon reachable";
+var DAEMON_CHECK_SELF_DETAIL = "this process is the shared daemon";
+var DAEMON_CHECK_DOWN_DETAIL = "no daemon answers on the configured port";
 var HOOK_FIXTURE_DIR = "fixtures";
 var HOOK_FIXTURE_FILE = "hook-roundtrip.json";
 var HOOK_ENTRY_FILE = "hook.mjs";
@@ -28581,7 +28587,6 @@ var D8_ORPHAN_HEALED_FIX = "run ctx_doctor again; D8 then reads PASS";
 function D8_ORPHAN_MOVE_FAILED(detail, cause) {
   return `${detail}; moving them aside failed: ${cause}`;
 }
-var DOCTOR_TOOL_NAME = "ctx_doctor";
 function JOURNAL_SKIPPED_LINE(cause) {
   return `Journal row for this call skipped: ${cause}`;
 }
@@ -29079,6 +29084,51 @@ var ISSUE_FORM_URL = `https://github.com/${ISSUE_REPO_SLUG}/issues/new?template=
 var DOCTOR_GIT_VERSION_TIMEOUT_MS = 5e3;
 var DOCTOR_LOG_TAIL_BYTES = 262144;
 
+// src/core/lifecycle/exit.ts
+function installExitGuard(opts) {
+  if (opts.isTTY) return;
+  process.stdin.once("end", () => {
+    opts.onShutdown();
+    const sigtermTimer = setTimeout(() => {
+      console.error("context-mode: still running " + EXIT_SIGTERM_MS + " ms after SIGTERM");
+    }, EXIT_SIGTERM_MS);
+    const sigkillTimer = setTimeout(() => {
+      process.kill(process.pid, "SIGKILL");
+    }, EXIT_SIGKILL_MS);
+    sigtermTimer.unref();
+    sigkillTimer.unref();
+    process.once("exit", () => {
+      clearTimeout(sigtermTimer);
+      clearTimeout(sigkillTimer);
+    });
+    process.kill(process.pid, "SIGTERM");
+  });
+}
+
+// src/entries/is-entry.ts
+import { realpathSync } from "node:fs";
+function isEntry(main, argv1, self) {
+  if (main !== void 0) return main;
+  if (argv1 === void 0 || argv1 === "") return false;
+  try {
+    return realpathSync(argv1) === realpathSync(self);
+  } catch {
+    return false;
+  }
+}
+
+// src/entries/server-core.ts
+import { randomUUID } from "node:crypto";
+import { existsSync as existsSync23, realpathSync as realpathSync12, rmSync as rmSync9 } from "node:fs";
+import { dirname as dirname13, join as join23 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+
+// node_modules/@modelcontextprotocol/server/dist/index.mjs
+var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
+
+// src/core/contracts/agents.ts
+var AGENT_IDS = ["claude-code", "codex", "gemini", "qwen", "copilot-cli", "vscode", "kiro", "zcode", "pi", "opencode"];
+
 // src/core/contracts/errors.ts
 var ERROR_TEXT = Object.freeze({
   NODE_TOO_OLD: "Context Mode needs Node 24.15.0 or newer; you have <v>. Fix: nvm install 24, or install it from https://nodejs.org.",
@@ -29491,30 +29541,9 @@ function ownCallRow(project, ctx, name, reply4) {
   };
 }
 
-// src/core/lifecycle/exit.ts
-function installExitGuard(opts) {
-  if (opts.isTTY) return;
-  process.stdin.once("end", () => {
-    opts.onShutdown();
-    const sigtermTimer = setTimeout(() => {
-      console.error("context-mode: still running " + EXIT_SIGTERM_MS + " ms after SIGTERM");
-    }, EXIT_SIGTERM_MS);
-    const sigkillTimer = setTimeout(() => {
-      process.kill(process.pid, "SIGKILL");
-    }, EXIT_SIGKILL_MS);
-    sigtermTimer.unref();
-    sigkillTimer.unref();
-    process.once("exit", () => {
-      clearTimeout(sigtermTimer);
-      clearTimeout(sigkillTimer);
-    });
-    process.kill(process.pid, "SIGTERM");
-  });
-}
-
 // src/core/project/config-dir.ts
 import { basename, dirname, join, posix, resolve, win32 } from "node:path";
-var { existsSync: existsSync2, mkdirSync: mkdirSync2, readFileSync, readdirSync, realpathSync } = process.getBuiltinModule("node:fs");
+var { existsSync: existsSync2, mkdirSync: mkdirSync2, readFileSync, readdirSync, realpathSync: realpathSync2 } = process.getBuiltinModule("node:fs");
 function homeDirOf(env, platform = process.platform) {
   const set3 = (v) => v !== void 0 && v !== "";
   if (platform === "win32") {
@@ -29596,7 +29625,7 @@ function realOrSelf(path8) {
   const tail = [];
   for (let at = path8; ; ) {
     try {
-      return join(realpathSync.native(at), ...tail.reverse());
+      return join(realpathSync2.native(at), ...tail.reverse());
     } catch {
       const up = dirname(at);
       if (up === at) return path8;
@@ -29655,7 +29684,7 @@ function resolveConfigDir(env) {
   const set3 = env[DATA_DIR_ENV];
   const dir = dataRootOf(env, set3 !== void 0 && set3 !== "" ? "" : requireHomeDir(env));
   mkdirSync2(dir, { recursive: true });
-  return realpathSync.native(dir);
+  return realpathSync2.native(dir);
 }
 
 // src/core/project/resolve.ts
@@ -29663,10 +29692,10 @@ import { basename as basename2, dirname as dirname3, join as join3, resolve as r
 
 // src/core/project/contain.ts
 import { dirname as dirname2, join as join2, relative, sep } from "node:path";
-var { lstatSync, realpathSync: realpathSync2 } = process.getBuiltinModule("node:fs");
+var { lstatSync, realpathSync: realpathSync3 } = process.getBuiltinModule("node:fs");
 function real(p) {
   try {
-    return realpathSync2.native(p);
+    return realpathSync3.native(p);
   } catch {
     return void 0;
   }
@@ -29831,7 +29860,7 @@ function sha256Hex(text) {
 }
 
 // src/core/project/resolve.ts
-var { existsSync: existsSync3, readFileSync: readFileSync2, realpathSync: realpathSync3, statSync } = process.getBuiltinModule("node:fs");
+var { existsSync: existsSync3, readFileSync: readFileSync2, realpathSync: realpathSync4, statSync } = process.getBuiltinModule("node:fs");
 function sourceOf(agent) {
   switch (agent) {
     case "claude-code":
@@ -29872,7 +29901,7 @@ function dirOf(kind, src) {
 function gitDirs(dir) {
   let cur;
   try {
-    cur = realpathSync3.native(dir);
+    cur = realpathSync4.native(dir);
   } catch {
     throw new CtxError("NO_GIT_DIR", { path: dir });
   }
@@ -29881,7 +29910,7 @@ function gitDirs(dir) {
     const gitDir = gitDirAt(join3(cur, GIT_DIR_NAME));
     if (gitDir !== null) {
       const common = firstLine(join3(gitDir, GIT_COMMONDIR_FILE));
-      return { commonDir: realpathSync3.native(common === null ? gitDir : resolve2(gitDir, common)), worktree: cur, start };
+      return { commonDir: realpathSync4.native(common === null ? gitDir : resolve2(gitDir, common)), worktree: cur, start };
     }
     const up = dirname3(cur);
     if (up === cur) return { commonDir: null, start };
@@ -45072,6 +45101,7 @@ import { basename as basename5, join as join17 } from "node:path";
 
 // src/adapters/claude-code.ts
 var TOOL_NAME_PREFIX = "mcp__plugin_context-mode_context-mode__";
+var USER_MCP_TOOL_NAME_PREFIX = "mcp__context-mode__";
 var SHELL_TOOL_NAMES = Object.freeze(["Bash", "PowerShell"]);
 var POWERSHELL_TOOL = "PowerShell";
 var SHELL_CANONICAL = "Bash";
@@ -45249,7 +45279,10 @@ function requireFields(raw) {
 }
 function decode3(raw) {
   requireFields(raw);
-  const ev = decodeClaudeShape(raw, "claude-code", TOOL_NAME_PREFIX, CLAUDE_SOURCES);
+  const p = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {};
+  const toolName2 = typeof p.tool_name === "string" ? p.tool_name : "";
+  const ownPrefix = toolName2.startsWith(USER_MCP_TOOL_NAME_PREFIX) ? USER_MCP_TOOL_NAME_PREFIX : TOOL_NAME_PREFIX;
+  const ev = decodeClaudeShape(raw, "claude-code", ownPrefix, CLAUDE_SOURCES);
   if (ev.tool !== void 0 && ev.tool.name === POWERSHELL_TOOL) ev.tool.canonicalName = SHELL_CANONICAL;
   if (ev.cwd === "") ev.cwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
   if (ev.event === "PostToolUse" && ev.tool !== void 0 && ev.tool.callId === void 0) {
@@ -49017,7 +49050,7 @@ function detectV1(agent, home, scope = {}) {
 }
 
 // src/core/ops/plugin-root.ts
-import { existsSync as existsSync8, readdirSync as readdirSync6, readFileSync as readFileSync7, realpathSync as realpathSync4 } from "node:fs";
+import { existsSync as existsSync8, readdirSync as readdirSync6, readFileSync as readFileSync7, realpathSync as realpathSync5 } from "node:fs";
 import { dirname as dirname6, isAbsolute, join as join10, sep as sep2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 function missing(agent, path8) {
@@ -49052,7 +49085,7 @@ function recordedInstalls(text) {
 }
 var realOrNull = (path8) => {
   try {
-    return realpathSync4.native(path8);
+    return realpathSync5.native(path8);
   } catch {
     return null;
   }
@@ -49152,14 +49185,14 @@ function candidate(adapter, env, worktree) {
 function resolvePluginRoot(adapter, env, worktree) {
   const path8 = candidate(adapter, env, worktree);
   try {
-    return realpathSync4.native(path8);
+    return realpathSync5.native(path8);
   } catch {
     throw missing(adapter.id, path8);
   }
 }
 
 // src/setup/pi-gate.ts
-import { existsSync as existsSync9, readFileSync as readFileSync8, realpathSync as realpathSync5 } from "node:fs";
+import { existsSync as existsSync9, readFileSync as readFileSync8, realpathSync as realpathSync6 } from "node:fs";
 import path4 from "node:path";
 var EXTENSIONS_KEY = "extensions";
 var PROJECT_DIR = ".pi";
@@ -49176,7 +49209,7 @@ function load(file2) {
 }
 var real2 = (p) => {
   try {
-    return realpathSync5(p);
+    return realpathSync6(p);
   } catch {
     return path4.resolve(p);
   }
@@ -49597,8 +49630,30 @@ async function checkIndex(project) {
 }
 
 // src/core/ops/doctor-env.ts
-import { existsSync as existsSync12, readFileSync as readFileSync10, realpathSync as realpathSync6 } from "node:fs";
+import { existsSync as existsSync12, readFileSync as readFileSync10, realpathSync as realpathSync7 } from "node:fs";
 import { isAbsolute as isAbsolute2, join as join12, relative as relative2 } from "node:path";
+
+// src/core/ops/daemon-state.ts
+var selfPort;
+function daemonSelfPort() {
+  return selfPort;
+}
+function daemonConfiguredPort(env) {
+  const raw = env[DAEMON_PORT_ENV];
+  if (raw !== void 0 && /^[0-9]+$/.test(raw)) {
+    const port = Number(raw);
+    if (port >= 1 && port <= 65535) return port;
+  }
+  return DAEMON_DEFAULT_PORT;
+}
+function daemonCheckWanted(env) {
+  const raw = env[DAEMON_PORT_ENV];
+  if (raw === void 0 || !/^[0-9]+$/.test(raw)) return false;
+  const port = Number(raw);
+  return port >= 1 && port <= 65535;
+}
+
+// src/core/ops/doctor-env.ts
 function pass3(id, detail = DOCTOR_PASS_DETAIL) {
   return { id, label: DOCTOR_LABEL[id], status: "PASS", detail };
 }
@@ -49766,7 +49821,7 @@ function checkMcp(ctx, adapter) {
 }
 function piCwdInside(worktree, piCwd) {
   if (piCwd === void 0 || !existsSync12(piCwd)) return false;
-  const rel = relative2(worktree, realpathSync6.native(piCwd));
+  const rel = relative2(worktree, realpathSync7.native(piCwd));
   return rel === "" || !rel.startsWith("..") && !isAbsolute2(rel);
 }
 function checkProject(i) {
@@ -49786,9 +49841,23 @@ function checkShell(env) {
   if (shell !== null) return pass3("D11", D11_PASS_DETAIL(shell, win));
   return win ? fail3("D11", D11_WIN_DETAIL, D11_WIN_FIX) : fail3("D11", D11_POSIX_DETAIL, D11_POSIX_FIX);
 }
+async function checkDaemon(env) {
+  const self = daemonSelfPort();
+  if (self === void 0 && !daemonCheckWanted(env)) return void 0;
+  const port = self ?? daemonConfiguredPort(env);
+  const row5 = (status, detail, fixCommand) => fixCommand === void 0 ? { id: "D12", label: DAEMON_CHECK_LABEL, status, detail } : { id: "D12", label: DAEMON_CHECK_LABEL, status, detail, fixCommand };
+  try {
+    const r = await fetch(`http://${DAEMON_HOST}:${port}${DAEMON_HEALTH_PATH}`, { signal: AbortSignal.timeout(DAEMON_PROBE_TIMEOUT_MS), redirect: "manual" });
+    const prefix = self === void 0 ? "" : DAEMON_CHECK_SELF_DETAIL + "; ";
+    if (r.status === 204) return row5("PASS", `${prefix}${DAEMON_CHECK_PASS_DETAIL} at ${daemonUrlOf(port)}`);
+    return row5("FAIL", `${daemonUrlOf(port)} answered HTTP ${r.status}, not the daemon's 204`, DAEMON_CHECK_FIX);
+  } catch {
+    return row5("FAIL", `${DAEMON_CHECK_DOWN_DETAIL} ${daemonUrlOf(port)}`, DAEMON_CHECK_FIX);
+  }
+}
 
 // src/core/ops/doctor-hook.ts
-import { existsSync as existsSync14, mkdirSync as mkdirSync5, mkdtempSync, readFileSync as readFileSync11, realpathSync as realpathSync8, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { existsSync as existsSync14, mkdirSync as mkdirSync5, mkdtempSync, readFileSync as readFileSync11, realpathSync as realpathSync9, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import path7 from "node:path";
 
@@ -51614,7 +51683,7 @@ function nodeLaunch(env, host = { bun: process.versions.bun, execPath: process.e
 
 // src/setup/codex-trust.ts
 import { createHash } from "node:crypto";
-import { existsSync as existsSync13, realpathSync as realpathSync7 } from "node:fs";
+import { existsSync as existsSync13, realpathSync as realpathSync8 } from "node:fs";
 import path6 from "node:path";
 import { spawn as spawn3, spawnSync as spawnSync2 } from "node:child_process";
 
@@ -52008,7 +52077,7 @@ function codexHookJournaled(db) {
 }
 function realDir(p) {
   try {
-    return realpathSync8(p);
+    return realpathSync9(p);
   } catch {
     return p;
   }
@@ -52328,7 +52397,7 @@ function unsupportedHostOf(sig) {
 
 // src/core/ops/doctor-issue.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
-import { closeSync as closeSync2, existsSync as existsSync16, fstatSync, mkdirSync as mkdirSync7, openSync as openSync2, readFileSync as readFileSync12, readSync as readSync2, realpathSync as realpathSync9, writeFileSync as writeFileSync4 } from "node:fs";
+import { closeSync as closeSync2, existsSync as existsSync16, fstatSync, mkdirSync as mkdirSync7, openSync as openSync2, readFileSync as readFileSync12, readSync as readSync2, realpathSync as realpathSync10, writeFileSync as writeFileSync4 } from "node:fs";
 import { delimiter, join as join16 } from "node:path";
 var TOKEN_PREFIXES = ["ghp_", "gho_", "github_pat_", "sk-", "xoxb-", "AKIA"];
 function tildeOf(env) {
@@ -52336,7 +52405,7 @@ function tildeOf(env) {
   if (home === null || home === "") return (t) => t;
   const homes = [home];
   try {
-    const real3 = realpathSync9.native(home);
+    const real3 = realpathSync10.native(home);
     if (real3 !== home) homes.push(real3);
   } catch {
   }
@@ -52624,6 +52693,13 @@ async function runDoctorChecks(ctx, adapter, host0) {
   };
   const rows = [];
   for (const id of DOCTOR_CHECK_ORDER) rows.push(await guard(id, checks[id]));
+  let daemonRow;
+  try {
+    daemonRow = await checkDaemon(env);
+  } catch (err) {
+    daemonRow = { id: "D12", label: DAEMON_CHECK_LABEL, status: "UNKNOWN", detail: lineOf(err) };
+  }
+  if (daemonRow !== void 0) rows.push(daemonRow);
   const at = DOCTOR_CHECK_ORDER.indexOf("D8");
   if (orphan.length > 0) {
     const files = orphan;
@@ -52934,12 +53010,12 @@ import { existsSync as existsSync19, readFileSync as readFileSync15, statSync as
 import { dirname as dirname11, extname as extname3, join as join20, relative as relative3, resolve as resolve6 } from "node:path";
 
 // src/core/index/walk.ts
-import { readdirSync as readdirSync9, readFileSync as readFileSync14, realpathSync as realpathSync10, statSync as statSync6 } from "node:fs";
+import { readdirSync as readdirSync9, readFileSync as readFileSync14, realpathSync as realpathSync11, statSync as statSync6 } from "node:fs";
 import { join as join19 } from "node:path";
 var GITIGNORE = ".gitignore";
 var GIT_DIR = ".git";
 function walkDir(root, containmentRoot) {
-  const real3 = realpathSync10(root);
+  const real3 = realpathSync11(root);
   if (!isInside(containmentRoot, real3)) throw new CtxError("OUTSIDE_ROOT", { p: root, root: containmentRoot });
   const found = [];
   visit(real3, [], [], containmentRoot, /* @__PURE__ */ new Set([real3]), found);
@@ -52963,7 +53039,7 @@ function visit(abs, rel, parent, contain, seen, found) {
     if (e.isSymbolicLink()) {
       let resolved;
       try {
-        resolved = realpathSync10(path8);
+        resolved = realpathSync11(path8);
       } catch {
         continue;
       }
@@ -52978,7 +53054,7 @@ function visit(abs, rel, parent, contain, seen, found) {
     if (isFile) {
       found.push({ dir: rel, name: e.name, absPath: path8 });
     } else if (isDir) {
-      const key = e.isSymbolicLink() ? target : realpathSync10(path8);
+      const key = e.isSymbolicLink() ? target : realpathSync11(path8);
       if (seen.has(key)) continue;
       seen.add(key);
       visit(path8, segs, rules, contain, seen, found);
@@ -58400,19 +58476,7 @@ function checkCall(tool, input) {
   return parsed.success ? { ok: true, data: parsed.data } : { ok: false, line: invalidCallLine(tool, parsed.error.issues) };
 }
 
-// src/entries/is-entry.ts
-import { realpathSync as realpathSync11 } from "node:fs";
-function isEntry(main, argv1, self) {
-  if (main !== void 0) return main;
-  if (argv1 === void 0 || argv1 === "") return false;
-  try {
-    return realpathSync11(argv1) === realpathSync11(self);
-  } catch {
-    return false;
-  }
-}
-
-// src/entries/server.ts
+// src/entries/server-core.ts
 function resolveAgent(argv, env) {
   let afterFlag = false;
   for (const arg of argv) {
@@ -58459,13 +58523,13 @@ function metaNumber(meta3, key) {
   const v = meta3?.[key];
   return typeof v === "number" && Number.isSafeInteger(v) ? v : void 0;
 }
-function sessionIdOf(meta3, agent, env, serverId) {
+function sessionIdOf(meta3, agent, env, fallbackId) {
   const fromMeta = metaString(meta3, "sessionId");
   if (fromMeta !== void 0) return fromMeta;
   const key = agent === void 0 ? void 0 : HOST_SESSION_ENV[agent];
   const fromHost = key === void 0 ? void 0 : env[key];
   if (typeof fromHost === "string" && fromHost !== "") return fromHost;
-  return RUN_SESSION_PREFIX + serverId;
+  return fallbackId;
 }
 var CODEX_SANDBOX_STATE_META = "codex/sandbox-state-meta";
 var FILE_URL_PREFIX = "file:";
@@ -58515,26 +58579,44 @@ function errorReply(err) {
   console.error(err);
   return { text: INTERNAL_ERROR_LINE, isError: true, sandboxBytes: 0 };
 }
-async function startServer(argv, env) {
+function stdioRouting(argv, env, serverId) {
+  return {
+    agentOf: (_server, _meta) => resolveAgent(argv, env),
+    cwdOf: async (meta3, _req, server, agent) => {
+      const fromRoots = agent === "vscode" && !hasWorkspaceFolder(argv) ? await workspaceFromRoots(server) : void 0;
+      const callArgv = fromRoots === void 0 ? argv : [...argv, WORKSPACE_FOLDER_FLAG, fromRoots];
+      return { cwd: workspaceCwdOf(meta3, process.cwd(), process.argv[1]), argv: callArgv };
+    },
+    envOf: () => env,
+    fallbackIdOf: () => RUN_SESSION_PREFIX + serverId
+    // process-local id (§4 step 5, 00 A8)
+  };
+}
+async function createServerCore(argv, env) {
   const serverId = randomUUID();
   const degraded = await isDegraded();
   const tools = degraded ? TOOLS2.filter((t) => t.name === "ctx_doctor") : TOOLS2;
   const pending = /* @__PURE__ */ new Map();
   const held = [];
-  let cleaned = false;
+  const cleaned = /* @__PURE__ */ new Set();
+  let swept = false;
   async function openOwn(project) {
     const db = await openDb(project);
     const configDir = resolveConfigDir(process.env);
     try {
-      if (!cleaned) cleanupProject(db, configDir);
+      const dbPath = project.projectKey;
+      if (!cleaned.has(dbPath)) {
+        cleaned.add(dbPath);
+        cleanupProject(db, configDir);
+      }
       writeOwnerPid(configDir, project.projectKey, serverId);
     } catch (err) {
       closeDb(db);
       throw err;
     }
     held.push(db);
-    if (!cleaned) {
-      cleaned = true;
+    if (!swept) {
+      swept = true;
       sweepDeadProjects(configDir);
     }
     return db;
@@ -58561,62 +58643,89 @@ async function startServer(argv, env) {
     const db = await ownDb(project);
     appendEvent(db, ownCallRow(project, ctx, name, reply4));
   }
-  function dispatch(server, tool) {
+  let activeCalls = 0;
+  let idleWaiters = [];
+  const callStarted = () => {
+    activeCalls++;
+  };
+  const callEnded = () => {
+    activeCalls--;
+    if (activeCalls === 0) {
+      const wake = idleWaiters;
+      idleWaiters = [];
+      for (const w of wake) w();
+    }
+  };
+  const inFlight = () => activeCalls;
+  const drain = async () => {
+    if (activeCalls === 0) return;
+    await new Promise((resolve7) => {
+      idleWaiters.push(resolve7);
+    });
+  };
+  function dispatch(server, tool, routing) {
     return async (input, req) => {
-      const meta3 = req.mcpReq._meta;
-      const agent = resolveAgent(argv, env);
-      const fromRoots = agent === "vscode" && !hasWorkspaceFolder(argv) ? await workspaceFromRoots(server) : void 0;
-      const callArgv = fromRoots === void 0 ? argv : [...argv, WORKSPACE_FOLDER_FLAG, fromRoots];
-      let project;
-      const projectOf = () => {
-        if (agent === void 0) throw new CtxError("NO_PROJECT", { kind: "--agent" });
-        project ??= resolveProject(agent, { env, argv: callArgv, cwd: workspaceCwdOf(meta3, process.cwd(), process.argv[1]), piCwd: void 0 });
-        return project;
-      };
-      const ctx = {
-        get project() {
-          return projectOf();
-        },
-        sessionId: sessionIdOf(meta3, agent, env, serverId),
-        turn: metaNumber(meta3, "turn") ?? 0,
-        signal: req.mcpReq.signal,
-        clientInfo: server.server.getClientVersion(),
-        protocolVersion: server.server.getNegotiatedProtocolVersion() ?? ""
-      };
-      let reply4;
-      const checked = checkCall(tool, input);
-      if (!checked.ok) {
-        reply4 = { text: checked.line, isError: true, sandboxBytes: 0 };
-      } else {
-        try {
-          reply4 = await tool.handler(checked.data, ctx);
-        } catch (err) {
-          reply4 = errorReply(err);
-        }
+      callStarted();
+      try {
+        return await dispatchInner(server, tool, routing, input, req);
+      } finally {
+        callEnded();
       }
-      if (stopRequested()) {
-        setTimeout(stopSelf, UPGRADE_STOP_DELAY_MS);
-        return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
-      }
-      if (!degraded) {
-        let resolved;
-        try {
-          resolved = projectOf();
-        } catch (err) {
-          console.error("context-mode: no journal row: " + (err instanceof Error ? err.message : String(err)));
-        }
-        if (resolved !== void 0) {
-          try {
-            await journal(resolved, ctx, tool.name, reply4);
-          } catch (err) {
-            reply4 = tool.name === DOCTOR_TOOL_NAME ? { ...reply4, text: reply4.text + "\n" + JOURNAL_SKIPPED_LINE(errorReply(err).text) } : errorReply(err);
-          }
-        }
-      }
-      return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
     };
   }
-  function createServer() {
+  async function dispatchInner(server, tool, routing, input, req) {
+    const meta3 = req.mcpReq._meta;
+    const agent = routing.agentOf(server, meta3, req);
+    const { cwd, argv: callArgv } = await routing.cwdOf(meta3, req, server, agent);
+    let project;
+    const projectOf = () => {
+      if (agent === void 0) throw new CtxError("NO_PROJECT", { kind: "--agent" });
+      project ??= resolveProject(agent, { env: routing.envOf(), argv: callArgv, cwd, piCwd: void 0 });
+      return project;
+    };
+    const ctx = {
+      get project() {
+        return projectOf();
+      },
+      sessionId: sessionIdOf(meta3, agent, routing.envOf(), routing.fallbackIdOf(req)),
+      turn: metaNumber(meta3, "turn") ?? 0,
+      signal: req.mcpReq.signal,
+      clientInfo: server.server.getClientVersion(),
+      protocolVersion: server.server.getNegotiatedProtocolVersion() ?? ""
+    };
+    let reply4;
+    const checked = checkCall(tool, input);
+    if (!checked.ok) {
+      reply4 = { text: checked.line, isError: true, sandboxBytes: 0 };
+    } else {
+      try {
+        reply4 = await tool.handler(checked.data, ctx);
+      } catch (err) {
+        reply4 = errorReply(err);
+      }
+    }
+    if (stopRequested()) {
+      setTimeout(stopSelf, UPGRADE_STOP_DELAY_MS);
+      return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
+    }
+    if (!degraded) {
+      let resolved;
+      try {
+        resolved = projectOf();
+      } catch (err) {
+        console.error("context-mode: no journal row: " + (err instanceof Error ? err.message : String(err)));
+      }
+      if (resolved !== void 0) {
+        try {
+          await journal(resolved, ctx, tool.name, reply4);
+        } catch (err) {
+          reply4 = tool.name === "ctx_doctor" ? { ...reply4, text: reply4.text + "\n" + JOURNAL_SKIPPED_LINE(errorReply(err).text) } : errorReply(err);
+        }
+      }
+    }
+    return { content: [{ type: "text", text: reply4.text }], isError: reply4.isError };
+  }
+  function createMcpServer(routing) {
     const server = new McpServer(
       { name: SERVER_KEY, version: "dev" },
       // DEVIATIONS: no version constant in contracts yet
@@ -58639,12 +58748,11 @@ async function startServer(argv, env) {
           ...tool.readOnly ? { annotations: { readOnlyHint: true } } : {},
           ...tool.alwaysLoad ? { _meta: { "anthropic/alwaysLoad": true } } : {}
         },
-        dispatch(server, tool)
+        dispatch(server, tool, routing)
       );
     }
     return server;
   }
-  let handle;
   function shutdown() {
     for (const db of held) {
       try {
@@ -58656,25 +58764,39 @@ async function startServer(argv, env) {
       }
       closeDb(db);
     }
-    handle?.close().catch((err) => console.error(err));
   }
   function stopSelf() {
     shutdown();
     process.kill(process.pid, "SIGTERM");
   }
-  installExitGuard({ onShutdown: shutdown, isTTY: process.stdin.isTTY === true });
-  handle = serveStdio(createServer);
+  return { serverId, degraded, drain, inFlight, shutdown, stopSelf, createMcpServer };
+}
+
+// src/entries/server.ts
+async function startServer(argv, env) {
+  const core = await createServerCore(argv, env);
+  const routing = stdioRouting(argv, env, core.serverId);
+  let handle;
+  installExitGuard({ onShutdown: core.shutdown, isTTY: process.stdin.isTTY === true });
+  handle = serveStdio(() => core.createMcpServer(routing));
   await new Promise((resolve7) => process.once("exit", () => resolve7()));
 }
-if (isEntry(import.meta.main, process.argv[1], fileURLToPath3(import.meta.url))) {
+if (isEntry(import.meta.main, process.argv[1], fileURLToPath4(import.meta.url))) {
   const [, , ...cliArgs] = process.argv;
   await startServer(cliArgs, process.env);
 }
 export {
   INSTRUCTIONS,
+  errorReply,
+  hasWorkspaceFolder,
+  isDegraded,
+  metaNumber,
+  resolveAgent,
   sessionIdOf,
   startServer,
-  workspaceCwdOf
+  workspaceCwdOf,
+  workspaceFromMeta,
+  workspaceFromRoots
 };
 /*! Bundled license information:
 

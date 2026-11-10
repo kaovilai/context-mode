@@ -4,16 +4,12 @@
 #   Reads use TRAFFIC_TOKEN (traffic needs push access); the commit uses the job token, so it starts no new run.
 # readme-stats: keeps the README counts, the star chart and the npm downloads charts current (main only).
 # Scheduled jobs run only on the default branch (main); until the merge, each push to v2-design and workflow_dispatch run the capture.
+# FORK ONLY: no schedule here. The daily capture needs TRAFFIC_TOKEN (unset on the fork), the star chart needs
+# stargazer history this fork does not have yet, and a daily adoption-history commit on fork main would collide
+# with upstream's own daily commit to the same file on every fork-sync rebase. Upstream's data arrives with the
+# rebase; workflow_dispatch still runs the jobs by hand.
 name: readme-stats
 on:
-  schedule: [{ cron: "17 3 * * *" }]
-  push:
-    branches: [v2-design]
-    paths-ignore:
-      - docs/assets/readme/data/adoption-history.json
-      - stats.json
-      - docs/assets/readme/src/star-data.js
-      - docs/assets/readme/src/npm-data.js
   workflow_dispatch: {}
 permissions:
   contents: write

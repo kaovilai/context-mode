@@ -133,16 +133,19 @@ describe("ADR-0004 server entry and exit guard", () => {
   });
 
   // D-CR2-SID-1: the MCP server uses the session id the hooks journal under, when the host exposes it.
-  test("sessionIdOf: _meta first, then the host session env, then mcp:<serverId>", async () => {
+  test("sessionIdOf: _meta first, then the host session env, then the caller's fallback UNCHANGED", async () => {
     const { sessionIdOf } = await import("../src/entries/server.ts");
     const env = { CLAUDE_CODE_SESSION_ID: "280ff837-09ba-4152-bb02-89ec3a42eca9" };
     assert.equal(sessionIdOf({ sessionId: "m-1" }, "claude-code", env, "srv"), "m-1");
     assert.equal(sessionIdOf(undefined, "claude-code", env, "srv"), "280ff837-09ba-4152-bb02-89ec3a42eca9");
-    assert.equal(sessionIdOf(undefined, "claude-code", {}, "srv"), "mcp:srv");
-    assert.equal(sessionIdOf(undefined, "claude-code", { CLAUDE_CODE_SESSION_ID: "" }, "srv"), "mcp:srv");
-    // A host without a session env keeps the process-local id.
-    assert.equal(sessionIdOf(undefined, "gemini", env, "srv"), "mcp:srv");
-    assert.equal(sessionIdOf(undefined, undefined, env, "srv"), "mcp:srv");
+    // the fallback passes through unchanged (A26-r8): the stdio routing supplies the mcp: prefix,
+    // the daemon routing supplies the session header / transport id / anonymous id without one
+    assert.equal(sessionIdOf(undefined, "claude-code", {}, "mcp:srv"), "mcp:srv");
+    assert.equal(sessionIdOf(undefined, "claude-code", {}, "host-1"), "host-1");
+    assert.equal(sessionIdOf(undefined, "claude-code", { CLAUDE_CODE_SESSION_ID: "" }, "mcp:srv"), "mcp:srv");
+    // A host without a session env keeps the caller's fallback.
+    assert.equal(sessionIdOf(undefined, "gemini", env, "mcp:srv"), "mcp:srv");
+    assert.equal(sessionIdOf(undefined, undefined, env, "mcp:srv"), "mcp:srv");
   });
 });
 

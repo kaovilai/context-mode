@@ -1,90 +1,10 @@
 #!/usr/bin/env node
 import{createRequire as __cmRequire}from"node:module";if(typeof process.getBuiltinModule!=="function")process.getBuiltinModule=(id)=>__cmRequire(import.meta.url)(id);
-var __create = Object.create;
 var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
-};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-
-// node_modules/sisteransi/src/index.js
-var require_src = __commonJS({
-  "node_modules/sisteransi/src/index.js"(exports, module) {
-    "use strict";
-    var ESC2 = "\x1B";
-    var CSI2 = `${ESC2}[`;
-    var beep = "\x07";
-    var cursor3 = {
-      to(x2, y2) {
-        if (!y2) return `${CSI2}${x2 + 1}G`;
-        return `${CSI2}${y2 + 1};${x2 + 1}H`;
-      },
-      move(x2, y2) {
-        let ret = "";
-        if (x2 < 0) ret += `${CSI2}${-x2}D`;
-        else if (x2 > 0) ret += `${CSI2}${x2}C`;
-        if (y2 < 0) ret += `${CSI2}${-y2}A`;
-        else if (y2 > 0) ret += `${CSI2}${y2}B`;
-        return ret;
-      },
-      up: (count = 1) => `${CSI2}${count}A`,
-      down: (count = 1) => `${CSI2}${count}B`,
-      forward: (count = 1) => `${CSI2}${count}C`,
-      backward: (count = 1) => `${CSI2}${count}D`,
-      nextLine: (count = 1) => `${CSI2}E`.repeat(count),
-      prevLine: (count = 1) => `${CSI2}F`.repeat(count),
-      left: `${CSI2}G`,
-      hide: `${CSI2}?25l`,
-      show: `${CSI2}?25h`,
-      save: `${ESC2}7`,
-      restore: `${ESC2}8`
-    };
-    var scroll = {
-      up: (count = 1) => `${CSI2}S`.repeat(count),
-      down: (count = 1) => `${CSI2}T`.repeat(count)
-    };
-    var erase3 = {
-      screen: `${CSI2}2J`,
-      up: (count = 1) => `${CSI2}1J`.repeat(count),
-      down: (count = 1) => `${CSI2}J`.repeat(count),
-      line: `${CSI2}2K`,
-      lineEnd: `${CSI2}K`,
-      lineStart: `${CSI2}1K`,
-      lines(count) {
-        let clear = "";
-        for (let i2 = 0; i2 < count; i2++)
-          clear += this.line + (i2 < count - 1 ? cursor3.up() : "");
-        if (count)
-          clear += cursor3.left;
-        return clear;
-      }
-    };
-    module.exports = { cursor: cursor3, scroll, erase: erase3, beep };
-  }
-});
 
 // src/entries/cli.ts
 import { spawn as spawn4 } from "node:child_process";
@@ -249,6 +169,10 @@ var EXEC_LANGUAGES = Object.freeze(["shell", "powershell", "javascript", "typesc
 var SHELL_FAMILY = Object.freeze(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
 var PLAIN_OUTPUT_ENV = Object.freeze({ NO_COLOR: "1", FORCE_COLOR: "0" });
 var HOST_SESSION_ENV = Object.freeze({ "claude-code": "CLAUDE_CODE_SESSION_ID" });
+var DAEMON_HOST = "127.0.0.1";
+var DAEMON_DEFAULT_PORT = 8790;
+var DAEMON_PATH = "/mcp";
+var DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}`;
 var NODE_MIN = "24.15.0";
 var DATA_ROOT = "~/.context-mode";
 var DATA_DIR_ENV = "CONTEXT_MODE_DATA_DIR";
@@ -757,6 +681,7 @@ var ISSUE_FORM_URL = `https://github.com/${ISSUE_REPO_SLUG}/issues/new?template=
 
 // src/adapters/claude-code.ts
 var TOOL_NAME_PREFIX = "mcp__plugin_context-mode_context-mode__";
+var USER_MCP_TOOL_NAME_PREFIX = "mcp__context-mode__";
 var SHELL_TOOL_NAMES = Object.freeze(["Bash", "PowerShell"]);
 var POWERSHELL_TOOL = "PowerShell";
 var SHELL_CANONICAL = "Bash";
@@ -934,7 +859,10 @@ function requireFields(raw) {
 }
 function decode(raw) {
   requireFields(raw);
-  const ev = decodeClaudeShape(raw, "claude-code", TOOL_NAME_PREFIX, CLAUDE_SOURCES);
+  const p3 = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {};
+  const toolName = typeof p3.tool_name === "string" ? p3.tool_name : "";
+  const ownPrefix = toolName.startsWith(USER_MCP_TOOL_NAME_PREFIX) ? USER_MCP_TOOL_NAME_PREFIX : TOOL_NAME_PREFIX;
+  const ev = decodeClaudeShape(raw, "claude-code", ownPrefix, CLAUDE_SOURCES);
   if (ev.tool !== void 0 && ev.tool.name === POWERSHELL_TOOL) ev.tool.canonicalName = SHELL_CANONICAL;
   if (ev.cwd === "") ev.cwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
   if (ev.event === "PostToolUse" && ev.tool !== void 0 && ev.tool.callId === void 0) {
@@ -1824,7 +1752,7 @@ function unsupportedHostByName(name) {
 
 // src/cli/args.ts
 var COMMANDS = ["setup", "doctor", "upgrade"];
-var ALL_COMMANDS = ["setup", "doctor", "upgrade", "server", "mcp", "hook", "help"];
+var ALL_COMMANDS = ["setup", "doctor", "upgrade", "server", "mcp", "hook", "daemon", "help"];
 var AGENT_IDS2 = ADAPTERS.map((a2) => a2.id);
 var COMMON = ["--help", "-h", "--json", "--yes", "-y", "--no-input", "--debug", "--quiet", "-q", "--verbose", "--no-color", "--agents"];
 var FLAGS = {
@@ -1958,6 +1886,7 @@ Commands:
   doctor                      Check every agent; changes nothing
   upgrade                     Install the newest context-mode from npm, then repair each agent
   server [--agent <id>]       Run the MCP server on stdio (alias: mcp)
+  daemon [--port <n>]         Run one shared MCP server for every session (opt-in; see docs/daemon.md)
   hook --agent <id>           Run one hook call: JSON on stdin, answer on stdout
   hook <platform> <event>     Old form of hook; still works, run context-mode setup to update it
 
@@ -1970,6 +1899,7 @@ Examples:
   context-mode setup
   context-mode doctor --agents codex
   context-mode server --agent codex
+  context-mode daemon --install
 `;
 var COMMON_HELP = `  --agents <ids>     Only these agents, comma-separated (ids: context-mode setup --list)
   -y, --yes          Do not ask; apply
@@ -2108,8 +2038,8 @@ __export(dist_exports, {
 // node_modules/@clack/core/dist/index.mjs
 import { styleText } from "node:util";
 import { stdout, stdin } from "node:process";
-import * as l from "node:readline";
-import l__default from "node:readline";
+import * as f$1 from "node:readline";
+import f__default from "node:readline";
 
 // node_modules/fast-string-truncated-width/dist/utils.js
 var getCodePointsLength = /* @__PURE__ */ (() => {
@@ -2197,7 +2127,7 @@ var getStringTruncatedWidth = (input, truncationOptions = {}, widthOptions = {})
     if (index >= length) {
       break outer;
     }
-    for (let i2 = 0, l2 = PARSE_BLOCKS.length; i2 < l2; i2++) {
+    for (let i2 = 0, l = PARSE_BLOCKS.length; i2 < l; i2++) {
       const [BLOCK_RE, BLOCK_WIDTH] = PARSE_BLOCKS[i2];
       BLOCK_RE.lastIndex = index;
       if (BLOCK_RE.test(input)) {
@@ -2447,25 +2377,77 @@ function wrapAnsi(string, columns, options) {
   return String(string).normalize().split(CRLF_OR_LF).map((line) => exec(line, columns, options)).join("\n");
 }
 
+// node_modules/sisteransi/dist/index.js
+var ESC2 = "\x1B";
+var CSI2 = `${ESC2}[`;
+var cursor = {
+  to(x2, y) {
+    if (!y)
+      return `${CSI2}${x2 + 1}G`;
+    return `${CSI2}${y + 1};${x2 + 1}H`;
+  },
+  move(x2, y) {
+    let ret = "";
+    if (x2 < 0)
+      ret += `${CSI2}${-x2}D`;
+    else if (x2 > 0)
+      ret += `${CSI2}${x2}C`;
+    if (y < 0)
+      ret += `${CSI2}${-y}A`;
+    else if (y > 0)
+      ret += `${CSI2}${y}B`;
+    return ret;
+  },
+  up: (count = 1) => `${CSI2}${count}A`,
+  down: (count = 1) => `${CSI2}${count}B`,
+  forward: (count = 1) => `${CSI2}${count}C`,
+  backward: (count = 1) => `${CSI2}${count}D`,
+  nextLine: (count = 1) => `${CSI2}E`.repeat(count),
+  prevLine: (count = 1) => `${CSI2}F`.repeat(count),
+  left: `${CSI2}G`,
+  hide: `${CSI2}?25l`,
+  show: `${CSI2}?25h`,
+  save: `${ESC2}7`,
+  restore: `${ESC2}8`
+};
+var erase = {
+  screen: `${CSI2}2J`,
+  up: (count = 1) => `${CSI2}1J`.repeat(count),
+  down: (count = 1) => `${CSI2}J`.repeat(count),
+  line: `${CSI2}2K`,
+  lineEnd: `${CSI2}K`,
+  lineStart: `${CSI2}1K`,
+  lines(count) {
+    let clear2 = "";
+    for (let i2 = 0; i2 < count; i2++)
+      clear2 += this.line + (i2 < count - 1 ? cursor.up() : "");
+    if (count)
+      clear2 += cursor.left;
+    return clear2;
+  }
+};
+var clear = {
+  screen: `${ESC2}c`
+};
+
 // node_modules/@clack/core/dist/index.mjs
-var import_sisteransi = __toESM(require_src(), 1);
 import { ReadStream } from "node:tty";
-function findCursor(s, o2, l2) {
-  if (!l2.some((r2) => !r2.disabled))
-    return s;
-  const t2 = s + o2, n3 = Math.max(l2.length - 1, 0), e = t2 < 0 ? n3 : t2 > n3 ? 0 : t2;
-  return l2[e]?.disabled ? findCursor(e, o2 < 0 ? -1 : 1, l2) : e;
+function findCursor(o2, s, l) {
+  if (!l.some((r2) => !r2.disabled))
+    return o2;
+  const t2 = o2 + s, n3 = Math.max(l.length - 1, 0), e = t2 < 0 ? n3 : t2 > n3 ? 0 : t2;
+  return l[e]?.disabled ? findCursor(e, s < 0 ? -1 : 1, l) : e;
 }
-function findTextCursor(s, o2, l2, i2) {
+function findTextCursor(o2, s, l, i2) {
   const t2 = i2.split(`
 `);
-  let n3 = 0, e = s;
+  let n3 = 0, e = o2;
   for (const r2 of t2) {
     if (e <= r2.length)
       break;
     e -= r2.length + 1, n3++;
   }
-  for (n3 = Math.max(0, Math.min(t2.length - 1, n3 + l2)), e = Math.min(e, t2[n3].length) + o2; e < 0 && n3 > 0; )
+  for (n3 = Math.max(0, Math.min(t2.length - 1, n3 + l)), e = Math.min(e, t2[n3].length) + s; e < 0 && n3 > 0; )
     n3--, e += t2[n3].length + 1;
   for (; e > t2[n3].length && n3 < t2.length - 1; )
     e -= t2[n3].length + 1, n3++;
@@ -2580,42 +2562,42 @@ function block({
   overwrite: o2 = true,
   hideCursor: n3 = true
 } = {}) {
-  const s = l.createInterface({
+  const s = f$1.createInterface({
     input: e,
     output: r2,
     prompt: "",
     tabSize: 1
   });
-  l.emitKeypressEvents(e, s), e instanceof ReadStream && e.isTTY && e.setRawMode(true);
-  const t2 = (f2, { name: a2, sequence: w }) => {
-    const c3 = String(f2);
-    if (isActionKey([c3, a2, w], "cancel")) {
-      n3 && r2.write(import_sisteransi.cursor.show), process.exit(0);
+  f$1.emitKeypressEvents(e, s), e instanceof ReadStream && e.isTTY && e.setRawMode(true);
+  const t2 = (l, { name: i2, sequence: p3 }) => {
+    const w = String(l);
+    if (isActionKey([w, i2, p3], "cancel")) {
+      n3 && r2.write(cursor.show), process.exit(0);
       return;
     }
     if (!o2) return;
-    const i2 = a2 === "return" ? 0 : -1, m3 = a2 === "return" ? -1 : 0;
-    l.moveCursor(r2, i2, m3, () => {
-      l.clearLine(r2, 1, () => {
+    const c3 = i2 === "return" ? 0 : -1, a2 = i2 === "return" ? -1 : 0;
+    f$1.moveCursor(r2, c3, a2, () => {
+      f$1.clearLine(r2, 1, () => {
         e.once("keypress", t2);
       });
     });
   };
-  return n3 && r2.write(import_sisteransi.cursor.hide), e.once("keypress", t2), () => {
-    e.off("keypress", t2), n3 && r2.write(import_sisteransi.cursor.show), e instanceof ReadStream && e.isTTY && !R && e.setRawMode(false), s.terminal = false, s.close();
+  return n3 && r2.write(cursor.hide), e.once("keypress", t2), () => {
+    e.off("keypress", t2), n3 && r2.write(cursor.show), e instanceof ReadStream && e.isTTY && !R && e.setRawMode(false), s.terminal = false, s.close();
   };
 }
 var getColumns = (e) => "columns" in e && typeof e.columns == "number" ? e.columns : 80;
 var getRows = (e) => "rows" in e && typeof e.rows == "number" ? e.rows : 20;
 function wrapTextWithPrefix(e, r2, o2, n3 = o2, s = o2, t2) {
-  const f2 = getColumns(e ?? stdout);
-  return wrapAnsi(r2, f2 - o2.length, {
+  const l = getColumns(e ?? stdout), i2 = dist_default2(o2);
+  return wrapAnsi(r2, l - i2, {
     hard: true,
     trim: false
   }).split(`
-`).map((c3, i2, m3) => {
-    const d = t2 ? t2(c3, i2) : c3;
-    return i2 === 0 ? `${n3}${d}` : i2 === m3.length - 1 ? `${s}${d}` : `${o2}${d}`;
+`).map((c3, a2, g2) => {
+    const m3 = t2 ? t2(c3, a2) : c3;
+    return a2 === 0 ? `${n3}${m3}` : a2 === g2.length - 1 ? `${s}${m3}` : `${o2}${m3}`;
   }).join(`
 `);
 }
@@ -2626,7 +2608,7 @@ function runValidation(e, a2) {
   }
   return e(a2);
 }
-var y = class {
+var C$1 = class C {
   input;
   output;
   _abortSignal;
@@ -2708,16 +2690,16 @@ var y = class {
           { once: true }
         );
       }
-      this.rl = l__default.createInterface({
+      this.rl = f__default.createInterface({
         input: this.input,
         tabSize: 2,
         prompt: "",
         escapeCodeTimeout: 50,
         terminal: true
       }), this.rl.prompt(), this.opts.initialUserInput !== void 0 && this._setUserInput(this.opts.initialUserInput, true), this.input.on("keypress", this.onKeypress), setRawMode(this.input, true), this.output.on("resize", this.render), this.render(), this.once("submit", () => {
-        this.output.write(import_sisteransi.cursor.show), this.output.off("resize", this.render), setRawMode(this.input, false), t2(this.value);
+        this.output.write(cursor.show), this.output.off("resize", this.render), setRawMode(this.input, false), t2(this.value);
       }), this.once("cancel", () => {
-        this.output.write(import_sisteransi.cursor.show), this.output.off("resize", this.render), setRawMode(this.input, false), t2(CANCEL_SYMBOL);
+        this.output.write(cursor.show), this.output.off("resize", this.render), setRawMode(this.input, false), t2(CANCEL_SYMBOL);
       });
     });
   }
@@ -2754,18 +2736,18 @@ var y = class {
 `), setRawMode(this.input, false), this.rl?.close(), this.rl = void 0, this.emit(`${this.state}`, this.value), this.unsubscribe();
   }
   restoreCursor() {
-    const t2 = wrapAnsi(this._prevFrame, process.stdout.columns, { hard: true, trim: false }).split(`
+    const t2 = wrapAnsi(this._prevFrame, getColumns(this.output), { hard: true, trim: false }).split(`
 `).length - 1;
-    this.output.write(import_sisteransi.cursor.move(-999, t2 * -1));
+    this.output.write(cursor.move(-999, t2 * -1));
   }
   render() {
-    const t2 = wrapAnsi(this._render(this) ?? "", process.stdout.columns, {
+    const t2 = wrapAnsi(this._render(this) ?? "", getColumns(this.output), {
       hard: true,
       trim: false
     });
     if (t2 !== this._prevFrame) {
       if (this.state === "initial")
-        this.output.write(import_sisteransi.cursor.hide);
+        this.output.write(cursor.hide);
       else {
         const e = diffLines(this._prevFrame, t2), i2 = getRows(this.output);
         if (this.restoreCursor(), e) {
@@ -2776,46 +2758,46 @@ var y = class {
             return;
           }
           if (e.lines.length === 1) {
-            this.output.write(import_sisteransi.cursor.move(0, n3 - r2)), this.output.write(import_sisteransi.erase.lines(1));
+            this.output.write(cursor.move(0, n3 - r2)), this.output.write(erase.lines(1));
             const o2 = t2.split(`
 `);
-            this.output.write(o2[n3]), this._prevFrame = t2, this.output.write(import_sisteransi.cursor.move(0, o2.length - n3 - 1));
+            this.output.write(o2[n3]), this._prevFrame = t2, this.output.write(cursor.move(0, o2.length - n3 - 1));
             return;
           } else if (e.lines.length > 1) {
             if (s < r2)
               n3 = s;
             else {
               const h2 = n3 - r2;
-              h2 > 0 && this.output.write(import_sisteransi.cursor.move(0, h2));
+              h2 > 0 && this.output.write(cursor.move(0, h2));
             }
-            this.output.write(import_sisteransi.erase.down());
-            const f2 = t2.split(`
+            this.output.write(erase.down());
+            const m3 = t2.split(`
 `).slice(n3);
-            this.output.write(f2.join(`
+            this.output.write(m3.join(`
 `)), this._prevFrame = t2;
             return;
           }
         }
-        this.output.write(import_sisteransi.erase.down());
+        this.output.write(erase.down());
       }
       this.output.write(t2), this.state === "initial" && (this.state = "active"), this._prevFrame = t2;
     }
   }
 };
-function p$1(l2, e) {
-  if (l2 === void 0 || e.length === 0)
+function p$1(l, e) {
+  if (l === void 0 || e.length === 0)
     return 0;
-  const i2 = e.findIndex((s) => s.value === l2);
+  const i2 = e.findIndex((s) => s.value === l);
   return i2 !== -1 ? i2 : 0;
 }
-function m(l2, e) {
-  return (e.label ?? String(e.value)).toLowerCase().includes(l2.toLowerCase());
+function m(l, e) {
+  return (e.label ?? String(e.value)).toLowerCase().includes(l.toLowerCase());
 }
-function g(l2, e) {
+function g(l, e) {
   if (e)
-    return l2 ? e : e[0];
+    return l ? e : e[0];
 }
-var T$1 = class T extends y {
+var T$1 = class T extends C$1 {
   filteredOptions;
   multiple;
   isNavigating = false;
@@ -2857,11 +2839,11 @@ var T$1 = class T extends y {
     return e === "	" || this.multiple && this.isNavigating && t2.name === "space" && e !== void 0 && e !== "";
   }
   #u(e, t2) {
-    const i2 = t2.name === "up", s = t2.name === "down", n3 = t2.name === "return", r2 = this.userInput === "" || this.userInput === "	", u5 = this.#n, d = this.options, c3 = u5 !== void 0 && u5 !== "" && d.some(
-      (o2) => !o2.disabled && (this.#t ? this.#t(u5, o2) : true)
+    const i2 = t2.name === "up", s = t2.name === "down", n3 = t2.name === "return", r2 = this.userInput === "" || this.userInput === "	", u4 = this.#n, d = this.options, c3 = u4 !== void 0 && u4 !== "" && d.some(
+      (o2) => !o2.disabled && (this.#t ? this.#t(u4, o2) : true)
     );
     if (t2.name === "tab" && r2 && c3) {
-      this.userInput === "	" && this._clearUserInput(), this._setUserInput(u5, true), this.isNavigating = false;
+      this.userInput === "	" && this._clearUserInput(), this._setUserInput(u4, true), this.isNavigating = false;
       return;
     }
     if (t2.name === "tab" && this.#l && !this.multiple && this.focusedValue !== void 0) {
@@ -2889,7 +2871,7 @@ var T$1 = class T extends y {
     }
   }
 };
-var r = class extends y {
+var r = class extends C$1 {
   get cursor() {
     return this.value ? 0 : 1;
   }
@@ -2900,7 +2882,7 @@ var r = class extends y {
     super(t2, false), this.value = !!t2.initialValue, this.on("userInput", () => {
       this.value = this._value;
     }), this.on("confirm", (i2) => {
-      this.output.write(import_sisteransi.cursor.move(0, -1)), this.value = i2, this.state = "submit", this.close();
+      this.output.write(cursor.move(0, -1)), this.value = i2, this.state = "submit", this.close();
     }), this.on("cursor", () => {
       this.value = !this.value;
     });
@@ -2935,7 +2917,7 @@ function f(r2) {
     day: p(r2.day)
   };
 }
-function c(r2, t2) {
+function c$1(r2, t2) {
   return new Date(r2 || 2001, t2 || 1, 0).getDate();
 }
 function b(r2) {
@@ -2945,7 +2927,7 @@ function b(r2) {
   if (!(n3.getUTCFullYear() !== t2 || n3.getUTCMonth() !== i2 - 1 || n3.getUTCDate() !== s))
     return { year: t2, month: i2, day: s };
 }
-function C(r2) {
+function C2(r2) {
   const t2 = b(r2);
   return t2 ? new Date(Date.UTC(t2.year, t2.month - 1, t2.day)) : void 0;
 }
@@ -2964,10 +2946,10 @@ function T2(r2, t2, i2, s) {
     max: e && t2.year === e.year ? e.month : 12
   } : {
     min: n3 && t2.year === n3.year && t2.month === n3.month ? n3.day : 1,
-    max: e && t2.year === e.year && t2.month === e.month ? e.day : c(t2.year, t2.month)
+    max: e && t2.year === e.year && t2.month === e.month ? e.day : c$1(t2.year, t2.month)
   };
 }
-var U = class extends y {
+var U = class extends C$1 {
   #i;
   #o;
   #t;
@@ -2996,7 +2978,7 @@ var U = class extends y {
     return this.#i.map((i2) => t2[i2.type]).join(this.#o);
   }
   #r() {
-    this._setUserInput(this.#l(this.#t)), this._setValue(C(this.#t) ?? void 0);
+    this._setUserInput(this.#l(this.#t)), this._setValue(C2(this.#t) ?? void 0);
   }
   constructor(t2) {
     const i2 = t2.format ? { segments: M(t2.format), separator: t2.separator ?? "/" } : P(t2.locale), s = t2.separator ?? i2.separator, n3 = t2.format ? M(t2.format) : i2.segments, e = t2.initialValue ?? t2.defaultValue, m3 = e ? {
@@ -3004,7 +2986,7 @@ var U = class extends y {
       month: String(e.getUTCMonth() + 1).padStart(2, "0"),
       day: String(e.getUTCDate()).padStart(2, "0")
     } : { year: "____", month: "__", day: "__" }, o2 = n3.map((a2) => m3[a2.type]).join(s);
-    super({ ...t2, initialUserInput: o2 }, false), this.#i = n3, this.#o = s, this.#t = m3, this.#h = t2.minDate, this.#u = t2.maxDate, this.#r(), this.on("cursor", (a2) => this.#f(a2)), this.on("key", (a2, u5) => this.#y(a2, u5)), this.on("finalize", () => this.#p(t2));
+    super({ ...t2, initialUserInput: o2 }, false), this.#i = n3, this.#o = s, this.#t = m3, this.#h = t2.minDate, this.#u = t2.maxDate, this.#r(), this.on("cursor", (a2) => this.#f(a2)), this.on("key", (a2, u4) => this.#y(a2, u4)), this.on("finalize", () => this.#p(t2));
   }
   #a() {
     const t2 = Math.max(0, Math.min(this.#e.segmentIndex, this.#i.length - 1)), i2 = this.#i[t2];
@@ -3084,33 +3066,33 @@ var U = class extends y {
         return;
       }
       this.#n && !m3 && (this.#t[e.type] = "_".repeat(e.len), this.#e.positionInSegment = 0), this.#n = false, this.#s = null;
-      const o2 = this.#t[e.type], a2 = o2.indexOf("_"), u5 = a2 >= 0 ? a2 : Math.min(this.#e.positionInSegment, e.len - 1);
-      if (u5 < 0 || u5 >= e.len) return;
-      let l2 = o2.slice(0, u5) + t2 + o2.slice(u5 + 1), D = false;
-      if (u5 === 0 && o2 === "__" && (e.type === "month" || e.type === "day")) {
+      const o2 = this.#t[e.type], a2 = o2.indexOf("_"), u4 = a2 >= 0 ? a2 : Math.min(this.#e.positionInSegment, e.len - 1);
+      if (u4 < 0 || u4 >= e.len) return;
+      let l = o2.slice(0, u4) + t2 + o2.slice(u4 + 1), D = false;
+      if (u4 === 0 && o2 === "__" && (e.type === "month" || e.type === "day")) {
         const h2 = Number.parseInt(t2, 10);
-        l2 = `0${t2}`, D = h2 <= (e.type === "month" ? 1 : 2);
+        l = `0${t2}`, D = h2 <= (e.type === "month" ? 1 : 2);
       }
-      if (e.type === "year" && (l2 = (o2.replace(/_/g, "") + t2).padStart(e.len, "_")), !l2.includes("_")) {
-        const h2 = { ...this.#t, [e.type]: l2 }, d = this.#g(h2, e);
+      if (e.type === "year" && (l = (o2.replace(/_/g, "") + t2).padStart(e.len, "_")), !l.includes("_")) {
+        const h2 = { ...this.#t, [e.type]: l }, d = this.#g(h2, e);
         if (d) {
           this.inlineError = d;
           return;
         }
       }
-      this.inlineError = "", this.#t[e.type] = l2;
-      const y2 = l2.includes("_") ? void 0 : b(this.#t);
-      if (y2) {
-        const { year: h2, month: d } = y2, g2 = c(h2, d);
+      this.inlineError = "", this.#t[e.type] = l;
+      const y = l.includes("_") ? void 0 : b(this.#t);
+      if (y) {
+        const { year: h2, month: d } = y, g2 = c$1(h2, d);
         this.#t = {
           year: String(Math.max(0, Math.min(9999, h2))).padStart(4, "0"),
           month: String(Math.max(1, Math.min(12, d))).padStart(2, "0"),
-          day: String(Math.max(1, Math.min(g2, y2.day))).padStart(2, "0")
+          day: String(Math.max(1, Math.min(g2, y.day))).padStart(2, "0")
         };
       }
       this.#r();
-      const S = l2.indexOf("_");
-      D ? (this.#n = true, this.#s = t2) : S >= 0 ? this.#e.positionInSegment = S : a2 >= 0 && n3.index < this.#i.length - 1 ? (this.#e.segmentIndex = n3.index + 1, this.#e.positionInSegment = 0, this.#n = true) : this.#e.positionInSegment = Math.min(u5 + 1, e.len - 1);
+      const S = l.indexOf("_");
+      D ? (this.#n = true, this.#s = t2) : S >= 0 ? this.#e.positionInSegment = S : a2 >= 0 && n3.index < this.#i.length - 1 ? (this.#e.segmentIndex = n3.index + 1, this.#e.positionInSegment = 0, this.#n = true) : this.#e.positionInSegment = Math.min(u4 + 1, e.len - 1);
     }
   }
   #g(t2, i2) {
@@ -3123,62 +3105,64 @@ var U = class extends y {
   #p(t2) {
     const { year: i2, month: s, day: n3 } = f(this.#t);
     if (i2 && s && n3) {
-      const e = c(i2, s);
+      const e = c$1(i2, s);
       this.#t = {
         ...this.#t,
         day: String(Math.min(n3, e)).padStart(2, "0")
       };
     }
-    this.value = C(this.#t) ?? t2.defaultValue ?? void 0;
+    this.value = C2(this.#t) ?? t2.defaultValue ?? void 0;
   }
 };
-var u$2 = class u extends y {
+var u$1 = class u extends C$1 {
   options;
   cursor = 0;
-  #t;
+  #e;
   getGroupItems(t2) {
-    return this.options.filter((r2) => r2.group === t2);
+    return this.options.filter((i2) => i2.group === t2);
   }
   isGroupSelected(t2) {
-    const r2 = this.getGroupItems(t2), e = this.value;
-    return e === void 0 ? false : r2.every((s) => e.includes(s.value));
+    const i2 = this.getGroupItems(t2), e = this.value;
+    return e === void 0 ? false : i2.every((s) => e.includes(s.value));
   }
   toggleValue() {
     const t2 = this.options[this.cursor];
     if (t2 !== void 0)
       if (this.value === void 0 && (this.value = []), t2.group === true) {
-        const r2 = t2.value, e = this.getGroupItems(r2);
-        this.isGroupSelected(r2) ? this.value = this.value.filter(
-          (s) => e.findIndex((i2) => i2.value === s) === -1
+        const i2 = t2.value, e = this.getGroupItems(i2);
+        this.isGroupSelected(i2) ? this.value = this.value.filter(
+          (s) => e.findIndex((r2) => r2.value === s) === -1
         ) : this.value = [...this.value, ...e.map((s) => s.value)], this.value = Array.from(new Set(this.value));
       } else {
-        const r2 = this.value.includes(t2.value);
-        this.value = r2 ? this.value.filter((e) => e !== t2.value) : [...this.value, t2.value];
+        const i2 = this.value.includes(t2.value);
+        this.value = i2 ? this.value.filter((e) => e !== t2.value) : [...this.value, t2.value];
       }
   }
   constructor(t2) {
     super(t2, false);
-    const { options: r2 } = t2;
-    this.#t = t2.selectableGroups !== false, this.options = Object.entries(r2).flatMap(([e, s]) => [
+    const { options: i2 } = t2;
+    this.#e = t2.selectableGroups !== false, this.options = Object.entries(i2).flatMap(([e, s]) => [
       { value: e, group: true, label: e },
-      ...s.map((i2) => ({ ...i2, group: e }))
+      ...s.map((r2) => ({ ...r2, group: e }))
     ]), this.value = [...t2.initialValues ?? []], this.cursor = Math.max(
       this.options.findIndex(({ value: e }) => e === t2.cursorAt),
-      this.#t ? 0 : 1
-    ), this.on("cursor", (e) => {
+      this.#e ? 0 : 1
+    ), this.on("key", (e, s) => {
+      s.name === void 0 && e === "\u3000" && this.toggleValue();
+    }), this.on("cursor", (e) => {
       switch (e) {
         case "left":
         case "up": {
           this.cursor = this.cursor === 0 ? this.options.length - 1 : this.cursor - 1;
           const s = this.options[this.cursor]?.group === true;
-          !this.#t && s && (this.cursor = this.cursor === 0 ? this.options.length - 1 : this.cursor - 1);
+          !this.#e && s && (this.cursor = this.cursor === 0 ? this.options.length - 1 : this.cursor - 1);
           break;
         }
         case "down":
         case "right": {
           this.cursor = this.cursor === this.options.length - 1 ? 0 : this.cursor + 1;
           const s = this.options[this.cursor]?.group === true;
-          !this.#t && s && (this.cursor = this.cursor === this.options.length - 1 ? 0 : this.cursor + 1);
+          !this.#e && s && (this.cursor = this.cursor === this.options.length - 1 ? 0 : this.cursor + 1);
           break;
         }
         case "space":
@@ -3189,7 +3173,7 @@ var u$2 = class u extends y {
   }
 };
 var o = /* @__PURE__ */ new Set(["up", "down", "left", "right"]);
-var h = class extends y {
+var h = class extends C$1 {
   #t = false;
   #s;
   focused = "editor";
@@ -3283,7 +3267,7 @@ ${i2}` : `${s}${styleText("inverse", r2)}${i2}`;
     });
   }
 };
-var a = class extends y {
+var a = class extends C$1 {
   options;
   cursor = 0;
   get _value() {
@@ -3314,8 +3298,8 @@ var a = class extends y {
       this.options.findIndex(({ value: t2 }) => t2 === e.cursorAt),
       0
     );
-    this.cursor = this.options[i2]?.disabled ? findCursor(i2, 1, this.options) : i2, this.on("key", (t2, l2) => {
-      l2.name === "a" && this.toggleAll(), l2.name === "i" && this.toggleInvert();
+    this.cursor = this.options[i2]?.disabled ? findCursor(i2, 1, this.options) : i2, this.on("key", (t2, s) => {
+      s.name === "a" && this.toggleAll(), s.name === "i" && this.toggleInvert(), s.name === void 0 && t2 === "\u3000" && this.toggleValue();
     }), this.on("cursor", (t2) => {
       switch (t2) {
         case "left":
@@ -3333,7 +3317,7 @@ var a = class extends y {
     });
   }
 };
-var u$1 = class u2 extends y {
+var u2 = class extends C$1 {
   _mask = "\u2022";
   get cursor() {
     return this._cursor;
@@ -3361,7 +3345,7 @@ var u$1 = class u2 extends y {
     });
   }
 };
-var n$1 = class n extends y {
+var n$1 = class n extends C$1 {
   options;
   cursor = 0;
   get _selectedValue() {
@@ -3389,24 +3373,24 @@ var n$1 = class n extends y {
     });
   }
 };
-var u3 = class extends y {
+var c = class extends C$1 {
   options;
   cursor = 0;
   constructor(t2) {
     super(t2, false), this.options = t2.options;
-    const s = t2.caseSensitive === true, i2 = this.options.map(({ value: [e] }) => s ? e : e?.toLowerCase());
-    this.cursor = Math.max(i2.indexOf(t2.initialValue), 0), this.on("key", (e) => {
+    const s = t2.caseSensitive === true, i2 = this.options.map(({ value: [e] }) => s ? e : e?.toLowerCase()), n3 = Math.max(i2.indexOf(t2.initialValue), 0);
+    this.cursor = this.options[n3]?.disabled ? 0 : n3, this.on("key", (e) => {
       if (!e)
         return;
       const o2 = s ? e : e.toLowerCase();
       if (!i2.includes(o2))
         return;
-      const n3 = this.options.find(({ value: [r2] }) => s ? r2 === o2 : r2?.toLowerCase() === o2);
-      n3 && (this.value = n3.value, this.state = "submit", this.emit("submit"));
+      const r2 = this.options.find(({ value: [a2], disabled: u4 }) => u4 ? false : s ? a2 === o2 : a2?.toLowerCase() === o2);
+      r2 && (this.value = r2.value, this.state = "submit", this.emit("submit"));
     });
   }
 };
-var n2 = class extends y {
+var n2 = class extends C$1 {
   get userInputWithCursor() {
     if (this.state === "submit")
       return this.userInput;
@@ -3434,7 +3418,6 @@ var n2 = class extends y {
 // node_modules/@clack/prompts/dist/index.mjs
 import { styleText as styleText2, stripVTControlCharacters } from "node:util";
 import process$1 from "node:process";
-var import_sisteransi2 = __toESM(require_src(), 1);
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 function isUnicodeSupported() {
@@ -3445,8 +3428,8 @@ function isUnicodeSupported() {
 }
 var unicode = isUnicodeSupported();
 var isCI = () => process.env.CI === "true";
-var isTTY = (o2) => o2.isTTY === true;
-var unicodeOr = (o2, e) => unicode ? o2 : e;
+var isTTY = (e) => e.isTTY === true;
+var unicodeOr = (e, o2) => unicode ? e : o2;
 var S_STEP_ACTIVE = unicodeOr("\u25C6", "*");
 var S_STEP_CANCEL = unicodeOr("\u25A0", "x");
 var S_STEP_ERROR = unicodeOr("\u25B2", "x");
@@ -3472,8 +3455,8 @@ var S_INFO = unicodeOr("\u25CF", "\u2022");
 var S_SUCCESS = unicodeOr("\u25C6", "*");
 var S_WARN = unicodeOr("\u25B2", "!");
 var S_ERROR = unicodeOr("\u25A0", "x");
-var symbol = (o2) => {
-  switch (o2) {
+var symbol = (e) => {
+  switch (e) {
     case "initial":
     case "active":
       return styleText2("cyan", S_STEP_ACTIVE);
@@ -3487,8 +3470,8 @@ var symbol = (o2) => {
       return styleText2("dim", S_STEP_ACTIVE);
   }
 };
-var symbolBar = (o2) => {
-  switch (o2) {
+var symbolBar = (e) => {
+  switch (e) {
     case "initial":
     case "active":
       return styleText2("cyan", S_BAR);
@@ -3500,49 +3483,50 @@ var symbolBar = (o2) => {
       return styleText2("green", S_BAR);
   }
 };
-function formatInstructionFooter(o2, e) {
-  const r2 = [`${e ? `${styleText2("cyan", S_BAR)}  ` : ""}${o2.join(" \u2022 ")}`];
-  return e && r2.push(styleText2("cyan", S_BAR_END)), r2;
+function formatInstructionFooter(e, o2, r2) {
+  const s = r2 ? `${styleText2("cyan", S_BAR)}  ` : "", n3 = wrapTextWithPrefix(e, o2.join(" \u2022 "), s).split(`
+`);
+  return r2 && n3.push(styleText2("cyan", S_BAR_END)), n3;
 }
-var I = (l2, e, w, p3, b3, C3 = false) => {
+var E$1 = (l, e, w, p3, b3, C4 = false) => {
   let r2 = e, O = 0;
-  if (C3)
+  if (C4)
     for (let i2 = p3 - 1; i2 >= w; i2--) {
-      const m3 = l2[i2];
+      const m3 = l[i2];
       if (m3 && (r2 -= m3.length), O++, r2 <= b3) break;
     }
   else
     for (let i2 = w; i2 < p3; i2++) {
-      const m3 = l2[i2];
+      const m3 = l[i2];
       if (m3 && (r2 -= m3.length), O++, r2 <= b3) break;
     }
   return { lineCount: r2, removals: O };
 };
 var limitOptions = ({
-  cursor: l2,
+  cursor: l,
   options: e,
   style: w,
   output: p3 = process.stdout,
   maxItems: b3 = Number.POSITIVE_INFINITY,
-  columnPadding: C3 = 0,
+  columnPadding: C4 = 0,
   rowPadding: r2 = 4
 }) => {
-  const i2 = getColumns(p3) - C3, m3 = getRows(p3), M2 = styleText2("dim", "..."), v = Math.max(m3 - r2, 0), a2 = Math.max(Math.min(b3, v), 5);
+  const i2 = getColumns(p3) - C4, m3 = getRows(p3), M2 = styleText2("dim", "..."), v = Math.max(m3 - r2, 0), a2 = Math.max(Math.min(b3, v), 5);
   let f2 = 0;
-  l2 >= a2 - 3 && (f2 = Math.max(
-    Math.min(l2 - a2 + 3, e.length - a2),
+  l >= a2 - 3 && (f2 = Math.max(
+    Math.min(l - a2 + 3, e.length - a2),
     0
   ));
   let d = a2 < e.length && f2 > 0, c3 = a2 < e.length && f2 + a2 < e.length;
-  const W2 = Math.min(
+  const I = Math.min(
     f2 + a2,
     e.length
   ), s = [];
   let g2 = 0;
   d && g2++, c3 && g2++;
-  const T3 = f2 + (d ? 1 : 0), y2 = W2 - (c3 ? 1 : 0);
-  for (let t2 = T3; t2 < y2; t2++) {
-    const n3 = e[t2], o2 = n3 ? w(n3, t2 === l2) : "", h2 = wrapAnsi(o2, i2, {
+  const T3 = f2 + (d ? 1 : 0), W2 = I - (c3 ? 1 : 0);
+  for (let t2 = T3; t2 < W2; t2++) {
+    const n3 = e[t2], o2 = n3 !== void 0 ? w(n3, t2 === l) : "", h2 = wrapAnsi(o2, i2, {
       hard: true,
       trim: false
     }).split(`
@@ -3551,17 +3535,17 @@ var limitOptions = ({
   }
   if (g2 > v) {
     let t2 = 0, n3 = 0, o2 = g2;
-    const h2 = l2 - T3;
-    let u5 = v;
-    const L = () => I(s, o2, 0, h2, u5), E2 = () => I(
+    const h2 = l - T3;
+    let u4 = v;
+    const L = () => E$1(s, o2, 0, h2, u4), y = () => E$1(
       s,
       o2,
       h2 + 1,
       s.length,
-      u5,
+      u4,
       true
     );
-    d ? ({ lineCount: o2, removals: t2 } = L(), o2 > u5 && (c3 || (u5 -= 1), { lineCount: o2, removals: n3 } = E2())) : (c3 || (u5 -= 1), { lineCount: o2, removals: n3 } = E2(), o2 > u5 && (u5 -= 1, { lineCount: o2, removals: t2 } = L())), t2 > 0 && (d = true, s.splice(0, t2)), n3 > 0 && (c3 = true, s.splice(s.length - n3, n3));
+    d ? ({ lineCount: o2, removals: t2 } = L(), o2 > u4 && (c3 || (u4 -= 1), { lineCount: o2, removals: n3 } = y())) : (c3 || (u4 -= 1), { lineCount: o2, removals: n3 } = y(), o2 > u4 && (u4 -= 1, { lineCount: o2, removals: t2 } = L())), t2 > 0 && (d = true, s.splice(0, t2)), n3 > 0 && (c3 = true, s.splice(s.length - n3, n3));
   }
   const x2 = [];
   d && x2.push(M2);
@@ -3587,7 +3571,7 @@ function j(t2, c3) {
 }
 var autocomplete = (t2) => new T$1({
   options: t2.options,
-  initialValue: t2.initialValue ? [t2.initialValue] : void 0,
+  initialValue: t2.initialValue !== void 0 ? [t2.initialValue] : void 0,
   initialUserInput: t2.initialUserInput,
   placeholder: t2.placeholder,
   completeOnTab: t2.completeOnTab,
@@ -3597,11 +3581,11 @@ var autocomplete = (t2) => new T$1({
   output: t2.output,
   validate: t2.validate,
   render() {
-    const n3 = t2.withGuide ?? settings.withGuide, i2 = n3 ? [`${styleText2("gray", S_BAR)}`, `${symbol(this.state)}  ${t2.message}`] : [`${symbol(this.state)}  ${t2.message}`], r2 = this.userInput, o2 = this.options, m3 = t2.placeholder, p3 = r2 === "" && m3 !== void 0, $ = (l2, s) => {
-      const a2 = E(l2), u5 = l2.hint && l2.value === this.focusedValue ? styleText2("dim", ` (${l2.hint})`) : "";
+    const n3 = t2.withGuide ?? settings.withGuide, i2 = n3 ? [`${styleText2("gray", S_BAR)}`, `${symbol(this.state)}  ${t2.message}`] : [`${symbol(this.state)}  ${t2.message}`], r2 = this.userInput, o2 = this.options, m3 = t2.placeholder, p3 = r2 === "" && m3 !== void 0, $ = (l, s) => {
+      const a2 = E(l), u4 = l.hint && l.value === this.focusedValue ? styleText2("dim", ` (${l.hint})`) : "";
       switch (s) {
         case "active":
-          return `${styleText2("green", S_RADIO_ACTIVE)} ${a2}${u5}`;
+          return `${styleText2("green", S_RADIO_ACTIVE)} ${a2}${u4}`;
         case "inactive":
           return `${styleText2("dim", S_RADIO_INACTIVE)} ${styleText2("dim", a2)}`;
         case "disabled":
@@ -3610,33 +3594,33 @@ var autocomplete = (t2) => new T$1({
     };
     switch (this.state) {
       case "submit": {
-        const l2 = j(this.selectedValues, o2), s = l2.length > 0 ? `  ${styleText2("dim", l2.map(E).join(", "))}` : "", a2 = n3 ? styleText2("gray", S_BAR) : "";
+        const l = j(this.selectedValues, o2), s = l.length > 0 ? `  ${styleText2("dim", l.map(E).join(", "))}` : "", a2 = n3 ? styleText2("gray", S_BAR) : "";
         return `${i2.join(`
 `)}
 ${a2}${s}`;
       }
       case "cancel": {
-        const l2 = r2 ? `  ${styleText2(["strikethrough", "dim"], r2)}` : "", s = n3 ? styleText2("gray", S_BAR) : "";
+        const l = r2 ? `  ${styleText2(["strikethrough", "dim"], r2)}` : "", s = n3 ? styleText2("gray", S_BAR) : "";
         return `${i2.join(`
 `)}
-${s}${l2}`;
+${s}${l}`;
       }
       default: {
-        const l2 = this.state === "error" ? "yellow" : "cyan", s = n3 ? `${styleText2(l2, S_BAR)}  ` : "", a2 = n3 ? styleText2(l2, S_BAR_END) : "";
-        let u5 = "";
+        const l = this.state === "error" ? "yellow" : "cyan", s = n3 ? `${styleText2(l, S_BAR)}  ` : "", a2 = n3 ? styleText2(l, S_BAR_END) : "";
+        let u4 = "";
         if (this.isNavigating || p3) {
           const d = p3 ? m3 : r2;
-          u5 = d !== "" ? ` ${styleText2("dim", d)}` : "";
+          u4 = d !== "" ? ` ${styleText2("dim", d)}` : "";
         } else
-          u5 = ` ${this.userInputWithCursor}`;
+          u4 = ` ${this.userInputWithCursor}`;
         const V = this.filteredOptions.length !== o2.length ? styleText2(
           "dim",
           ` (${this.filteredOptions.length} match${this.filteredOptions.length === 1 ? "" : "es"})`
-        ) : "", b3 = this.filteredOptions.length === 0 && r2 ? [`${s}${styleText2("yellow", "No matches found")}`] : [], y2 = this.state === "error" ? [`${s}${styleText2("yellow", this.error)}`] : [];
+        ) : "", b3 = this.filteredOptions.length === 0 && r2 ? [`${s}${styleText2("yellow", "No matches found")}`] : [], y = this.state === "error" ? [`${s}${styleText2("yellow", this.error)}`] : [];
         n3 && i2.push(`${s.trimEnd()}`), i2.push(
-          `${s}${styleText2("dim", "Search:")}${u5}${V}`,
+          `${s}${styleText2("dim", "Search:")}${u4}${V}`,
           ...b3,
-          ...y2
+          ...y
         );
         const S = [
           `${styleText2("dim", "\u2191/\u2193")} to select`,
@@ -3668,8 +3652,8 @@ ${s}${l2}`;
 }).prompt();
 var autocompleteMultiselect = (t2) => {
   const c3 = (i2, r2, o2, m3) => {
-    const p3 = o2.includes(i2.value), $ = i2.label ?? String(i2.value ?? ""), l2 = i2.hint && m3 !== void 0 && i2.value === m3 ? styleText2("dim", ` (${i2.hint})`) : "", s = p3 ? styleText2("green", S_CHECKBOX_SELECTED) : styleText2("dim", S_CHECKBOX_INACTIVE);
-    return i2.disabled ? `${styleText2("gray", S_CHECKBOX_INACTIVE)} ${styleText2(["strikethrough", "gray"], $)}` : r2 ? `${s} ${$}${l2}` : `${s} ${styleText2("dim", $)}`;
+    const p3 = o2.includes(i2.value), $ = i2.label ?? String(i2.value ?? ""), l = i2.hint && m3 !== void 0 && i2.value === m3 ? styleText2("dim", ` (${i2.hint})`) : "", s = p3 ? styleText2("green", S_CHECKBOX_SELECTED) : styleText2("dim", S_CHECKBOX_INACTIVE);
+    return i2.disabled ? `${styleText2("gray", S_CHECKBOX_INACTIVE)} ${styleText2(["strikethrough", "gray"], $)}` : r2 ? `${s} ${$}${l}` : `${s} ${styleText2("dim", $)}`;
   }, n3 = new T$1({
     options: t2.options,
     multiple: true,
@@ -3686,7 +3670,7 @@ var autocompleteMultiselect = (t2) => {
     render() {
       const i2 = t2.withGuide ?? settings.withGuide, r2 = `${i2 ? `${styleText2("gray", S_BAR)}
 ` : ""}${symbol(this.state)}  ${t2.message}
-`, o2 = this.userInput, m3 = t2.placeholder, p3 = o2 === "" && m3 !== void 0, $ = this.isNavigating || p3 ? styleText2("dim", p3 ? m3 : o2) : this.userInputWithCursor, l2 = this.options, s = this.filteredOptions.length !== l2.length ? styleText2(
+`, o2 = this.userInput, m3 = t2.placeholder, p3 = o2 === "" && m3 !== void 0, $ = this.isNavigating || p3 ? styleText2("dim", p3 ? m3 : o2) : this.userInputWithCursor, l = this.options, s = this.filteredOptions.length !== l.length ? styleText2(
         "dim",
         ` (${this.filteredOptions.length} match${this.filteredOptions.length === 1 ? "" : "es"})`
       ) : "";
@@ -3702,18 +3686,18 @@ var autocompleteMultiselect = (t2) => {
             o2
           )}`;
         default: {
-          const a2 = this.state === "error" ? "yellow" : "cyan", u5 = i2 ? `${styleText2(a2, S_BAR)}  ` : "", V = i2 ? styleText2(a2, S_BAR_END) : "", b3 = [
+          const a2 = this.state === "error" ? "yellow" : "cyan", u4 = i2 ? `${styleText2(a2, S_BAR)}  ` : "", V = i2 ? styleText2(a2, S_BAR_END) : "", b3 = [
             `${styleText2("dim", "\u2191/\u2193")} to navigate`,
             `${styleText2("dim", this.isNavigating ? "Space/Tab:" : "Tab:")} select`,
             `${styleText2("dim", "Enter:")} confirm`,
             `${styleText2("dim", "Type:")} to search`
-          ], y2 = this.filteredOptions.length === 0 && o2 ? [`${u5}${styleText2("yellow", "No matches found")}`] : [], S = this.state === "error" ? [`${u5}${styleText2("yellow", this.error)}`] : [], g2 = [
+          ], y = this.filteredOptions.length === 0 && o2 ? [`${u4}${styleText2("yellow", "No matches found")}`] : [], S = this.state === "error" ? [`${u4}${styleText2("yellow", this.error)}`] : [], g2 = [
             ...`${r2}${i2 ? styleText2(a2, S_BAR) : ""}`.split(`
 `),
-            `${u5}${styleText2("dim", "Search:")} ${$}${s}`,
-            ...y2,
+            `${u4}${styleText2("dim", "Search:")} ${$}${s}`,
+            ...y,
             ...S
-          ], O = [`${u5}${b3.join(" \u2022 ")}`, V], d = limitOptions({
+          ], O = [`${u4}${b3.join(" \u2022 ")}`, V], d = limitOptions({
             cursor: this.cursor,
             options: this.filteredOptions,
             style: (f2, L) => c3(f2, L, this.selectedValues, this.focusedValue),
@@ -3723,7 +3707,7 @@ var autocompleteMultiselect = (t2) => {
           });
           return [
             ...g2,
-            ...d.map((f2) => `${u5}${f2}`),
+            ...d.map((f2) => `${u4}${f2}`),
             ...O
           ].join(`
 `);
@@ -3746,12 +3730,12 @@ function A$1(n3, e, t2, o2) {
 }
 var U2 = (n3) => n3;
 var box = (n3 = "", e = "", t2) => {
-  const o2 = t2?.output ?? process.stdout, i2 = getColumns(o2), R2 = 1 * 2, u5 = t2?.titlePadding ?? 1, h2 = t2?.contentPadding ?? 2, w = t2?.width === void 0 || t2.width === "auto" ? 1 : Math.min(1, t2.width), m3 = t2?.withGuide ?? settings.withGuide ? `${styleText2("gray", S_BAR)} ` : "", b3 = t2?.formatBorder ?? U2, a2 = (t2?.rounded ? K : Q).map(b3), _2 = b3(S_BAR_H), p3 = b3(S_BAR), x2 = dist_default2(m3), B = dist_default2(e), y2 = i2 - x2;
+  const o2 = t2?.output ?? process.stdout, i2 = getColumns(o2), R2 = 1 * 2, u4 = t2?.titlePadding ?? 1, h2 = t2?.contentPadding ?? 2, w = t2?.width === void 0 || t2.width === "auto" ? 1 : Math.min(1, t2.width), m3 = t2?.withGuide ?? settings.withGuide ? `${styleText2("gray", S_BAR)} ` : "", b3 = t2?.formatBorder ?? U2, a2 = (t2?.rounded ? K : Q).map(b3), _2 = b3(S_BAR_H), p3 = b3(S_BAR), x2 = dist_default2(m3), B = dist_default2(e), y = i2 - x2;
   let r2 = Math.floor(i2 * w) - x2;
   if (t2?.width === "auto") {
     const c3 = n3.split(`
 `);
-    let s = B + u5 * 2;
+    let s = B + u4 * 2;
     for (const G of c3) {
       const P3 = dist_default2(G) + h2 * 2;
       P3 > s && (s = P3);
@@ -3759,11 +3743,11 @@ var box = (n3 = "", e = "", t2) => {
     const g2 = s + R2;
     g2 < r2 && (r2 = g2);
   }
-  r2 % 2 !== 0 && (r2 < y2 ? r2++ : r2--);
-  const d = r2 - R2, T3 = d - u5 * 2, S = B > T3 ? `${e.slice(0, T3 - 3)}...` : e, [O, W2] = A$1(
+  r2 % 2 !== 0 && (r2 < y ? r2++ : r2--);
+  const d = r2 - R2, T3 = d - u4 * 2, S = B > T3 ? `${e.slice(0, T3 - 3)}...` : e, [O, W2] = A$1(
     dist_default2(S),
     d,
-    u5,
+    u4,
     t2?.titleAlign
   ), L = wrapAnsi(n3, d - h2 * 2, {
     hard: true,
@@ -3800,11 +3784,11 @@ var confirm = (e) => {
     output: e.output,
     initialValue: e.initialValue ?? true,
     render() {
-      const i2 = e.withGuide ?? settings.withGuide, u5 = `${symbol(this.state)}  `, l2 = i2 ? `${styleText2("gray", S_BAR)}  ` : "", f2 = wrapTextWithPrefix(
+      const i2 = e.withGuide ?? settings.withGuide, u4 = `${symbol(this.state)}  `, l = i2 ? `${styleText2("gray", S_BAR)}  ` : "", f2 = wrapTextWithPrefix(
         e.output,
         e.message,
-        l2,
-        u5
+        l,
+        u4
       ), s = `${i2 ? `${styleText2("gray", S_BAR)}
 ` : ""}${f2}
 `, c3 = this.value ? a2 : o2;
@@ -3847,7 +3831,7 @@ var date = (e) => {
     render() {
       const t2 = (e?.withGuide ?? settings.withGuide) !== false, i2 = `${`${t2 ? `${styleText2("gray", S_BAR)}
 ` : ""}${symbol(this.state)}  `}${e.message}
-`, l2 = this.state !== "initial" ? this.state : "active", d = b2(this, l2), c3 = this.value instanceof Date ? this.formattedValue : "";
+`, l = this.state !== "initial" ? this.state : "active", d = b2(this, l), c3 = this.value instanceof Date ? this.formattedValue : "";
       switch (this.state) {
         case "error": {
           const a2 = this.error ? `  ${styleText2("yellow", this.error)}` : "", s = t2 ? `${styleText2("yellow", S_BAR)}  ` : "", f2 = t2 ? styleText2("yellow", S_BAR_END) : "";
@@ -3881,9 +3865,9 @@ function b2(e, r2) {
   if (r2 === "submit" || r2 === "cancel")
     return e.formattedValue;
   const i2 = styleText2("gray", e.separator);
-  return e.segments.map((l2, d) => {
-    const c3 = d === o2.segmentIndex && !["submit", "cancel"].includes(r2), a2 = p2[l2.type];
-    return x(t2[l2.type], { isActive: c3, label: a2 });
+  return e.segments.map((l, d) => {
+    const c3 = d === o2.segmentIndex && !["submit", "cancel"].includes(r2), a2 = p2[l.type];
+    return x(t2[l.type], { isActive: c3, label: a2 });
   }).join(i2);
 }
 function x(e, r2) {
@@ -3914,22 +3898,22 @@ var MULTISELECT_INSTRUCTIONS = [
   `${styleText2("dim", "Space:")} select`,
   `${styleText2("dim", "Enter:")} confirm`
 ];
-var m2 = (i2, u5) => i2.split(`
-`).map((d) => u5(d)).join(`
+var m2 = (n3, u4) => n3.split(`
+`).map((d) => u4(d)).join(`
 `);
-var multiselect = (i2) => {
-  const u5 = (t2, a2) => {
+var multiselect = (n3) => {
+  const u4 = (t2, a2) => {
     const r2 = t2.label ?? String(t2.value);
     return a2 === "disabled" ? `${styleText2("gray", S_CHECKBOX_INACTIVE)} ${m2(r2, (o2) => styleText2(["strikethrough", "gray"], o2))}${t2.hint ? ` ${styleText2("dim", `(${t2.hint ?? "disabled"})`)}` : ""}` : a2 === "active" ? `${styleText2("cyan", S_CHECKBOX_ACTIVE)} ${r2}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "selected" ? `${styleText2("green", S_CHECKBOX_SELECTED)} ${m2(r2, (o2) => styleText2("dim", o2))}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "cancelled" ? `${m2(r2, (o2) => styleText2(["strikethrough", "dim"], o2))}` : a2 === "active-selected" ? `${styleText2("green", S_CHECKBOX_SELECTED)} ${r2}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "submitted" ? `${m2(r2, (o2) => styleText2("dim", o2))}` : `${styleText2("dim", S_CHECKBOX_INACTIVE)} ${m2(r2, (o2) => styleText2("dim", o2))}`;
-  }, d = i2.required ?? true, x2 = i2.showInstructions ?? true;
+  }, d = n3.required ?? true, x2 = n3.showInstructions ?? true;
   return new a({
-    options: i2.options,
-    signal: i2.signal,
-    input: i2.input,
-    output: i2.output,
-    initialValues: i2.initialValues,
+    options: n3.options,
+    signal: n3.signal,
+    input: n3.input,
+    output: n3.output,
+    initialValues: n3.initialValues,
     required: d,
-    cursorAt: i2.cursorAt,
+    cursorAt: n3.cursorAt,
     validate(t2) {
       if (d && (t2 === void 0 || t2.length === 0))
         return `Please select at least one option.
@@ -3945,75 +3929,75 @@ ${styleText2(
         )}`;
     },
     render() {
-      const t2 = i2.withGuide ?? settings.withGuide, a2 = wrapTextWithPrefix(
-        i2.output,
-        i2.message,
+      const t2 = n3.withGuide ?? settings.withGuide, a2 = wrapTextWithPrefix(
+        n3.output,
+        n3.message,
         t2 ? `${symbolBar(this.state)}  ` : "",
         `${symbol(this.state)}  `
       ), r2 = `${t2 ? `${styleText2("gray", S_BAR)}
 ` : ""}${a2}
-`, o2 = this.value ?? [], g2 = (n3, l2) => {
-        if (n3.disabled)
-          return u5(n3, "disabled");
-        const s = o2.includes(n3.value);
-        return l2 && s ? u5(n3, "active-selected") : s ? u5(n3, "selected") : u5(n3, l2 ? "active" : "inactive");
+`, o2 = this.value ?? [], g2 = (i2, l) => {
+        if (i2.disabled)
+          return u4(i2, "disabled");
+        const s = o2.includes(i2.value);
+        return l && s ? u4(i2, "active-selected") : s ? u4(i2, "selected") : u4(i2, l ? "active" : "inactive");
       };
       switch (this.state) {
         case "submit": {
-          const n3 = this.options.filter(({ value: s }) => o2.includes(s)).map((s) => u5(s, "submitted")).join(styleText2("dim", ", ")) || styleText2("dim", "none"), l2 = wrapTextWithPrefix(
-            i2.output,
-            n3,
+          const i2 = this.options.filter(({ value: s }) => o2.includes(s)).map((s) => u4(s, "submitted")).join(styleText2("dim", ", ")) || styleText2("dim", "none"), l = wrapTextWithPrefix(
+            n3.output,
+            i2,
             t2 ? `${styleText2("gray", S_BAR)}  ` : ""
           );
-          return `${r2}${l2}`;
+          return `${r2}${l}`;
         }
         case "cancel": {
-          const n3 = this.options.filter(({ value: s }) => o2.includes(s)).map((s) => u5(s, "cancelled")).join(styleText2("dim", ", "));
-          if (n3.trim() === "")
+          const i2 = this.options.filter(({ value: s }) => o2.includes(s)).map((s) => u4(s, "cancelled")).join(styleText2("dim", ", "));
+          if (i2.trim() === "")
             return `${r2}${styleText2("gray", S_BAR)}`;
-          const l2 = wrapTextWithPrefix(
-            i2.output,
-            n3,
+          const l = wrapTextWithPrefix(
+            n3.output,
+            i2,
             t2 ? `${styleText2("gray", S_BAR)}  ` : ""
           );
-          return `${r2}${l2}${t2 ? `
+          return `${r2}${l}${t2 ? `
 ${styleText2("gray", S_BAR)}` : ""}`;
         }
         case "error": {
-          const n3 = t2 ? `${styleText2("yellow", S_BAR)}  ` : "", l2 = this.error.split(`
+          const i2 = t2 ? `${styleText2("yellow", S_BAR)}  ` : "", l = this.error.split(`
 `).map(
             ($, v) => v === 0 ? `${t2 ? `${styleText2("yellow", S_BAR_END)}  ` : ""}${styleText2("yellow", $)}` : `   ${$}`
           ).join(`
 `), s = r2.split(`
-`).length, h2 = l2.split(`
+`).length, h2 = l.split(`
 `).length + 1;
-          return `${r2}${n3}${limitOptions({
-            output: i2.output,
+          return `${r2}${i2}${limitOptions({
+            output: n3.output,
             options: this.options,
             cursor: this.cursor,
-            maxItems: i2.maxItems,
-            columnPadding: n3.length,
+            maxItems: n3.maxItems,
+            columnPadding: i2.length,
             rowPadding: s + h2,
             style: g2
           }).join(`
-${n3}`)}
-${l2}
+${i2}`)}
+${l}
 `;
         }
         default: {
-          const n3 = t2 ? `${styleText2("cyan", S_BAR)}  ` : "", l2 = r2.split(`
-`).length, s = x2 ? formatInstructionFooter(MULTISELECT_INSTRUCTIONS, t2) : t2 ? [styleText2("cyan", S_BAR_END)] : [], h2 = s.join(`
+          const i2 = t2 ? `${styleText2("cyan", S_BAR)}  ` : "", l = r2.split(`
+`).length, s = x2 ? formatInstructionFooter(n3.output, MULTISELECT_INSTRUCTIONS, t2) : t2 ? [styleText2("cyan", S_BAR_END)] : [], h2 = s.join(`
 `), $ = s.length + 1;
-          return `${r2}${n3}${limitOptions({
-            output: i2.output,
+          return `${r2}${i2}${limitOptions({
+            output: n3.output,
             options: this.options,
             cursor: this.cursor,
-            maxItems: i2.maxItems,
-            columnPadding: n3.length,
-            rowPadding: l2 + $,
+            maxItems: n3.maxItems,
+            columnPadding: i2.length,
+            rowPadding: l + $,
             style: g2
           }).join(`
-${n3}`)}
+${i2}`)}
 ${h2}
 `;
         }
@@ -4021,83 +4005,83 @@ ${h2}
     }
   }).prompt();
 };
-var groupMultiselect = (o2) => {
-  const { selectableGroups: f2 = true, groupSpacing: x2 = 0 } = o2, d = (n3, l2, p3 = []) => {
-    const a2 = n3.label ?? String(n3.value), t2 = typeof n3.group == "string", s = t2 && (p3[p3.indexOf(n3) + 1] ?? { group: true }), u5 = t2 && s && s.group === true;
-    let r2 = "", c3 = "";
-    t2 && (f2 ? (r2 = u5 ? `${S_BAR_END} ` : `${S_BAR} `, c3 = u5 ? "  " : `${S_BAR} `) : r2 = "  ");
+var groupMultiselect = (r2) => {
+  const { selectableGroups: f2 = true, groupSpacing: x2 = 0 } = r2, d = (n3, l, p3 = []) => {
+    const a2 = n3.label ?? String(n3.value), t2 = typeof n3.group == "string", u4 = t2 && (p3[p3.indexOf(n3) + 1] ?? { group: true }), s = t2 && u4 && u4.group === true;
+    let o2 = "", c3 = "";
+    t2 && (f2 ? (o2 = s ? `${S_BAR_END} ` : `${S_BAR} `, c3 = s ? "  " : `${S_BAR} `) : o2 = "  ");
     let i2 = "";
     if (x2 > 0 && !t2 && (i2 = `
-`.repeat(x2)), l2 === "active")
+`.repeat(x2)), l === "active")
       return wrapTextWithPrefix(
-        o2.output,
+        r2.output,
         `${a2}${n3.hint ? ` ${styleText2("dim", `(${n3.hint})`)}` : ""}`,
-        `${i2}${styleText2("dim", r2)} `,
-        `${i2}${styleText2("dim", r2)}${styleText2("cyan", S_CHECKBOX_ACTIVE)} `,
+        `${i2}${styleText2("dim", o2)} `,
+        `${i2}${styleText2("dim", o2)}${styleText2("cyan", S_CHECKBOX_ACTIVE)} `,
         `${i2}${styleText2("dim", c3)} `
       );
-    if (l2 === "group-active")
+    if (l === "group-active")
       return wrapTextWithPrefix(
-        o2.output,
+        r2.output,
         a2,
-        `${i2}${r2} `,
-        `${i2}${r2}${styleText2("cyan", S_CHECKBOX_ACTIVE)} `,
+        `${i2}${o2} `,
+        `${i2}${o2}${styleText2("cyan", S_CHECKBOX_ACTIVE)} `,
         `${i2}${c3} `,
         (m3) => styleText2("dim", m3)
       );
-    if (l2 === "group-active-selected")
+    if (l === "group-active-selected")
       return wrapTextWithPrefix(
-        o2.output,
+        r2.output,
         a2,
-        `${i2}${r2} `,
-        `${i2}${r2}${styleText2("green", S_CHECKBOX_SELECTED)} `,
+        `${i2}${o2} `,
+        `${i2}${o2}${styleText2("green", S_CHECKBOX_SELECTED)} `,
         `${i2}${c3} `,
         (m3) => styleText2("dim", m3)
       );
-    if (l2 === "selected") {
+    if (l === "selected") {
       const m3 = t2 || f2 ? styleText2("green", S_CHECKBOX_SELECTED) : "";
       return wrapTextWithPrefix(
-        o2.output,
+        r2.output,
         `${a2}${n3.hint ? ` (${n3.hint})` : ""}`,
-        `${i2}${styleText2("dim", r2)} `,
-        `${i2}${styleText2("dim", r2)}${m3} `,
+        `${i2}${styleText2("dim", o2)} `,
+        `${i2}${styleText2("dim", o2)}${m3} `,
         `${i2}${styleText2("dim", c3)} `,
-        (I2) => styleText2("dim", I2)
+        (I) => styleText2("dim", I)
       );
     }
-    if (l2 === "cancelled")
+    if (l === "cancelled")
       return `${styleText2(["strikethrough", "dim"], a2)}`;
-    if (l2 === "active-selected")
+    if (l === "active-selected")
       return wrapTextWithPrefix(
-        o2.output,
+        r2.output,
         `${a2}${n3.hint ? ` ${styleText2("dim", `(${n3.hint})`)}` : ""}`,
-        `${i2}${styleText2("dim", r2)} `,
-        `${i2}${styleText2("dim", r2)}${styleText2("green", S_CHECKBOX_SELECTED)} `,
+        `${i2}${styleText2("dim", o2)} `,
+        `${i2}${styleText2("dim", o2)}${styleText2("green", S_CHECKBOX_SELECTED)} `,
         `${i2}${styleText2("dim", c3)} `
       );
-    if (l2 === "submitted")
+    if (l === "submitted")
       return `${styleText2("dim", a2)}`;
     const h2 = t2 || f2 ? styleText2("dim", S_CHECKBOX_INACTIVE) : "";
     return wrapTextWithPrefix(
-      o2.output,
+      r2.output,
       a2,
-      `${i2}${styleText2("dim", r2)} `,
-      `${i2}${styleText2("dim", r2)}${h2} `,
+      `${i2}${styleText2("dim", o2)} `,
+      `${i2}${styleText2("dim", o2)}${h2} `,
       `${i2}${styleText2("dim", c3)} `,
       (m3) => styleText2("dim", m3)
     );
-  }, y2 = o2.required ?? true, S = o2.showInstructions ?? true;
-  return new u$2({
-    options: o2.options,
-    signal: o2.signal,
-    input: o2.input,
-    output: o2.output,
-    initialValues: o2.initialValues,
-    required: y2,
-    cursorAt: o2.cursorAt,
+  }, y = r2.required ?? true, S = r2.showInstructions ?? true;
+  return new u$1({
+    options: r2.options,
+    signal: r2.signal,
+    input: r2.input,
+    output: r2.output,
+    initialValues: r2.initialValues,
+    required: y,
+    cursorAt: r2.cursorAt,
     selectableGroups: f2,
     validate(n3) {
-      if (y2 && (n3 === void 0 || n3.length === 0))
+      if (y && (n3 === void 0 || n3.length === 0))
         return `Please select at least one option.
 ${styleText2(
           "reset",
@@ -4111,58 +4095,58 @@ ${styleText2(
         )}`;
     },
     render() {
-      const n3 = o2.withGuide ?? settings.withGuide, l2 = `${n3 ? `${styleText2("gray", S_BAR)}
-` : ""}${symbol(this.state)}  ${o2.message}
-`, p3 = this.value ?? [], a2 = (t2, s) => {
-        const u5 = this.options, r2 = p3.includes(t2.value) || t2.group === true && this.isGroupSelected(`${t2.value}`);
-        return !s && typeof t2.group == "string" && this.options[this.cursor]?.value === t2.group ? d(t2, r2 ? "group-active-selected" : "group-active", u5) : s && r2 ? d(t2, "active-selected", u5) : r2 ? d(t2, "selected", u5) : d(t2, s ? "active" : "inactive", u5);
+      const n3 = r2.withGuide ?? settings.withGuide, l = `${n3 ? `${styleText2("gray", S_BAR)}
+` : ""}${symbol(this.state)}  ${r2.message}
+`, p3 = this.value ?? [], a2 = (t2, u4) => {
+        const s = this.options, o2 = p3.includes(t2.value) || t2.group === true && this.isGroupSelected(`${t2.value}`);
+        return !u4 && typeof t2.group == "string" && this.options[this.cursor]?.value === t2.group ? d(t2, o2 ? "group-active-selected" : "group-active", s) : u4 && o2 ? d(t2, "active-selected", s) : o2 ? d(t2, "selected", s) : d(t2, u4 ? "active" : "inactive", s);
       };
       switch (this.state) {
         case "submit": {
-          const t2 = this.options.filter(({ value: u5 }) => p3.includes(u5)).map((u5) => d(u5, "submitted")), s = t2.length === 0 ? "" : `  ${t2.join(styleText2("dim", ", "))}`;
-          return `${l2}${n3 ? styleText2("gray", S_BAR) : ""}${s}`;
+          const t2 = this.options.filter(({ value: s }) => p3.includes(s)).map((s) => d(s, "submitted")), u4 = t2.length === 0 ? "" : `  ${t2.join(styleText2("dim", ", "))}`;
+          return `${l}${n3 ? styleText2("gray", S_BAR) : ""}${u4}`;
         }
         case "cancel": {
-          const t2 = this.options.filter(({ value: s }) => p3.includes(s)).map((s) => d(s, "cancelled")).join(styleText2("dim", ", "));
-          return `${l2}${n3 ? `${styleText2("gray", S_BAR)}  ` : ""}${t2.trim() ? `${t2}${n3 ? `
+          const t2 = this.options.filter(({ value: u4 }) => p3.includes(u4)).map((u4) => d(u4, "cancelled")).join(styleText2("dim", ", "));
+          return `${l}${n3 ? `${styleText2("gray", S_BAR)}  ` : ""}${t2.trim() ? `${t2}${n3 ? `
 ${styleText2("gray", S_BAR)}` : ""}` : ""}`;
         }
         case "error": {
-          const t2 = n3 ? `${styleText2("yellow", S_BAR)}  ` : "", s = this.error.split(`
+          const t2 = n3 ? `${styleText2("yellow", S_BAR)}  ` : "", u4 = this.error.split(`
 `).map(
             (i2, h2) => h2 === 0 ? `${n3 ? `${styleText2("yellow", S_BAR_END)}  ` : ""}${styleText2("yellow", i2)}` : `   ${i2}`
           ).join(`
-`), u5 = l2.split(`
-`).length, r2 = s.split(`
+`), s = l.split(`
+`).length, o2 = u4.split(`
 `).length + 1, c3 = limitOptions({
-            output: o2.output,
+            output: r2.output,
             options: this.options,
             cursor: this.cursor,
-            maxItems: o2.maxItems,
+            maxItems: r2.maxItems,
             columnPadding: t2.length,
-            rowPadding: u5 + r2,
+            rowPadding: s + o2,
             style: a2
           }).join(`
 ${t2}`);
-          return `${l2}${t2}${c3}
-${s}
+          return `${l}${t2}${c3}
+${u4}
 `;
         }
         default: {
-          const t2 = n3 ? `${styleText2("cyan", S_BAR)}  ` : "", s = l2.split(`
-`).length, u5 = S ? formatInstructionFooter(MULTISELECT_INSTRUCTIONS, n3) : n3 ? [styleText2("cyan", S_BAR_END)] : [], r2 = u5.join(`
-`), c3 = u5.length + 1, i2 = limitOptions({
-            output: o2.output,
+          const t2 = n3 ? `${styleText2("cyan", S_BAR)}  ` : "", u4 = l.split(`
+`).length, s = S ? formatInstructionFooter(r2.output, MULTISELECT_INSTRUCTIONS, n3) : n3 ? [styleText2("cyan", S_BAR_END)] : [], o2 = s.join(`
+`), c3 = s.length + 1, i2 = limitOptions({
+            output: r2.output,
             options: this.options,
             cursor: this.cursor,
-            maxItems: o2.maxItems,
+            maxItems: r2.maxItems,
             columnPadding: t2.length,
-            rowPadding: s + c3,
+            rowPadding: u4 + c3,
             style: a2
           }).join(`
 ${t2}`);
-          return `${l2}${t2}${i2}
-${r2}
+          return `${l}${t2}${i2}
+${o2}
 `;
         }
       }
@@ -4174,19 +4158,19 @@ var log = {
     symbol: e = styleText2("gray", S_BAR),
     secondarySymbol: r2 = styleText2("gray", S_BAR),
     output: m3 = process.stdout,
-    spacing: l2 = 1,
+    spacing: l = 1,
     withGuide: c3
   } = {}) => {
-    const t2 = [], o2 = c3 ?? settings.withGuide, f2 = o2 ? r2 : "", O = o2 ? `${e}  ` : "", u5 = o2 ? `${r2}  ` : "";
-    for (let i2 = 0; i2 < l2; i2++)
+    const t2 = [], o2 = c3 ?? settings.withGuide, f2 = o2 ? r2 : "", O = o2 ? `${e}  ` : "", u4 = o2 ? `${r2}  ` : "";
+    for (let i2 = 0; i2 < l; i2++)
       t2.push(f2);
     const g2 = Array.isArray(s) ? s : s.split(`
 `);
     if (g2.length > 0) {
-      const [i2, ...y2] = g2;
+      const [i2, ...y] = g2;
       i2.length > 0 ? t2.push(`${O}${i2}`) : t2.push(o2 ? e : "");
-      for (const p3 of y2)
-        p3.length > 0 ? t2.push(`${u5}${p3}`) : t2.push(o2 ? r2 : "");
+      for (const p3 of y)
+        p3.length > 0 ? t2.push(`${u4}${p3}`) : t2.push(o2 ? r2 : "");
     }
     m3.write(`${t2.join(`
 `)}
@@ -4245,57 +4229,57 @@ var multiline = (e) => new h({
 `, h2 = e.placeholder && e.placeholder.length > 0 ? (
       // biome-ignore lint/style/noNonNullAssertion: guarded by placeholder.length > 0
       styleText2("inverse", e.placeholder[0]) + styleText2("dim", e.placeholder.slice(1))
-    ) : styleText2(["inverse", "hidden"], "_"), a2 = this.userInput ? this.userInputWithCursor : h2, l2 = this.value ?? "", d = e.showSubmit ? `
+    ) : styleText2(["inverse", "hidden"], "_"), a2 = this.userInput ? this.userInputWithCursor : h2, l = this.value ?? "", d = e.showSubmit ? `
   ${styleText2(this.focused === "submit" ? "cyan" : "dim", "[ submit ]")}` : "";
     switch (this.state) {
       case "error": {
-        const n3 = `${styleText2("yellow", S_BAR)}  `, r2 = i2 ? wrapTextWithPrefix(e.output, a2, n3, void 0) : a2, u5 = styleText2("yellow", S_BAR_END);
+        const n3 = `${styleText2("yellow", S_BAR)}  `, r2 = i2 ? wrapTextWithPrefix(e.output, a2, n3, void 0) : a2, u4 = styleText2("yellow", S_BAR_END);
         return `${o2}${r2}
-${u5}  ${styleText2("yellow", this.error)}${d}
+${u4}  ${styleText2("yellow", this.error)}${d}
 `;
       }
       case "submit": {
         const n3 = `${styleText2("gray", S_BAR)}  `, r2 = i2 ? wrapTextWithPrefix(
           e.output,
-          l2,
+          l,
           n3,
           void 0,
           void 0,
-          (u5) => styleText2("dim", u5)
-        ) : l2 ? styleText2("dim", l2) : "";
+          (u4) => styleText2("dim", u4)
+        ) : l ? styleText2("dim", l) : "";
         return `${o2}${r2}`;
       }
       case "cancel": {
         const n3 = `${styleText2("gray", S_BAR)}  `, r2 = i2 ? wrapTextWithPrefix(
           e.output,
-          l2,
+          l,
           n3,
           void 0,
           void 0,
-          (u5) => styleText2(["strikethrough", "dim"], u5)
-        ) : l2 ? styleText2(["strikethrough", "dim"], l2) : "";
+          (u4) => styleText2(["strikethrough", "dim"], u4)
+        ) : l ? styleText2(["strikethrough", "dim"], l) : "";
         return `${o2}${r2}`;
       }
       default: {
-        const n3 = i2 ? `${styleText2("cyan", S_BAR)}  ` : "", r2 = i2 ? styleText2("cyan", S_BAR_END) : "", u5 = i2 ? wrapTextWithPrefix(e.output, a2, n3) : a2;
-        return `${o2}${u5}
+        const n3 = i2 ? `${styleText2("cyan", S_BAR)}  ` : "", r2 = i2 ? styleText2("cyan", S_BAR_END) : "", u4 = i2 ? wrapTextWithPrefix(e.output, a2, n3) : a2;
+        return `${o2}${u4}
 ${r2}${d}
 `;
       }
     }
   }
 }).prompt();
-var W$1 = (o2) => o2;
-var C2 = (o2, e, s) => {
+var W = (o2) => o2;
+var C3 = (o2, e, s) => {
   const a2 = {
     hard: true,
     trim: false
   }, i2 = wrapAnsi(o2, e, a2).split(`
-`), c3 = i2.reduce((n3, t2) => Math.max(dist_default2(t2), n3), 0), u5 = i2.map(s).reduce((n3, t2) => Math.max(dist_default2(t2), n3), 0), g2 = e - (u5 - c3);
+`), c3 = i2.reduce((n3, t2) => Math.max(dist_default2(t2), n3), 0), u4 = i2.map(s).reduce((n3, t2) => Math.max(dist_default2(t2), n3), 0), g2 = e - (u4 - c3);
   return wrapAnsi(o2, g2, a2);
 };
 var note = (o2 = "", e = "", s) => {
-  const a2 = s?.output ?? process$1.stdout, i2 = s?.withGuide ?? settings.withGuide, c3 = s?.format ?? W$1, g2 = ["", ...C2(o2, getColumns(a2) - 6, c3).split(`
+  const a2 = s?.output ?? process$1.stdout, i2 = s?.withGuide ?? settings.withGuide, c3 = s?.format ?? W, g2 = ["", ...C3(o2, getColumns(a2) - 6, c3).split(`
 `).map(c3), ""], n3 = dist_default2(e), t2 = Math.max(
     g2.reduce((m3, F) => {
       const O = dist_default2(F);
@@ -4317,7 +4301,7 @@ ${styleText2("gray", l$1 + S_BAR_H.repeat(t2 + 2) + S_CORNER_BOTTOM_RIGHT)}
 `
   );
 };
-var password = (e) => new u$1({
+var password = (e) => new u2({
   validate: e.validate,
   mask: e.mask ?? S_PASSWORD_MASK,
   signal: e.signal,
@@ -4374,17 +4358,18 @@ var path = (e) => {
         return [];
       try {
         let i2;
-        existsSync(t2) ? lstatSync(t2).isDirectory() && (!e.directory || t2.endsWith("/")) ? i2 = t2 : i2 = dirname(t2) : i2 = dirname(t2);
-        const c3 = t2.length > 1 && t2.endsWith("/") ? t2.slice(0, -1) : t2;
+        const o2 = t2.endsWith("/") || t2.endsWith("\\");
+        existsSync(t2) ? lstatSync(t2).isDirectory() && (!e.directory || o2) ? i2 = t2 : i2 = dirname(t2) : i2 = dirname(t2);
+        const m3 = t2.length > 1 && o2 ? t2.slice(0, -1) : t2;
         return readdirSync(i2).map((r2) => {
-          const n3 = join(i2, r2), m3 = lstatSync(n3);
+          const n3 = join(i2, r2), l = lstatSync(n3);
           return {
             name: r2,
             path: n3,
-            isDirectory: m3.isDirectory()
+            isDirectory: l.isDirectory()
           };
         }).filter(
-          ({ path: r2, isDirectory: n3 }) => r2.startsWith(c3) && (n3 || !e.directory)
+          ({ path: r2, isDirectory: n3 }) => r2.startsWith(m3) && (n3 || !e.directory)
         ).map((r2) => ({
           value: r2.path
         }));
@@ -4394,87 +4379,106 @@ var path = (e) => {
     }
   });
 };
-var W = (l2) => styleText2("magenta", l2);
+var Y = 3e4;
+var Z = (c3) => styleText2("magenta", c3);
 var spinner = ({
-  indicator: l2 = "dots",
-  onCancel: h2,
+  indicator: c3 = "dots",
+  onCancel: b3,
   output: n3 = process.stdout,
-  cancelMessage: G,
-  errorMessage: O,
-  frames: E2 = unicode ? ["\u25D2", "\u25D0", "\u25D3", "\u25D1"] : ["\u2022", "o", "O", "0"],
-  delay: F = unicode ? 80 : 120,
-  signal: m3,
-  ...I2
+  cancelMessage: _2,
+  errorMessage: C4,
+  frames: M2 = unicode ? ["\u25D2", "\u25D0", "\u25D3", "\u25D1"] : ["\u2022", "o", "O", "0"],
+  delay: O = unicode ? 80 : 120,
+  signal: g2,
+  ...E2
 } = {}) => {
-  const u5 = isCI();
-  let M2, T3, d = false, S = false, s = "", p3, w = performance.now();
-  const x2 = getColumns(n3), k = I2?.styleFrame ?? W, g2 = (e) => {
-    const r2 = e > 1 ? O ?? settings.messages.error : G ?? settings.messages.cancel;
-    S = e === 1, d && (a2(r2, e), S && typeof h2 == "function" && h2());
-  }, f2 = () => g2(2), i2 = () => g2(1), A2 = () => {
-    process.on("uncaughtExceptionMonitor", f2), process.on("unhandledRejection", f2), process.on("SIGINT", i2), process.on("SIGTERM", i2), process.on("exit", g2), m3 && m3.addEventListener("abort", i2);
-  }, H = () => {
-    process.removeListener("uncaughtExceptionMonitor", f2), process.removeListener("unhandledRejection", f2), process.removeListener("SIGINT", i2), process.removeListener("SIGTERM", i2), process.removeListener("exit", g2), m3 && m3.removeEventListener("abort", i2);
-  }, y2 = () => {
-    if (p3 === void 0) return;
-    u5 && n3.write(`
+  const u4 = isCI(), h2 = isAccessible(E2.accessible);
+  let x2, I, p3 = false, l = false, r2 = "", v, w = performance.now();
+  const y = getColumns(n3), F = E2?.styleFrame ?? Z, S = (e) => {
+    const s = e > 1 ? C4 ?? settings.messages.error : _2 ?? settings.messages.cancel;
+    l = e === 1, p3 && (m3(s, e), l && typeof b3 == "function" && b3());
+  }, $ = () => S(2), a2 = () => S(1), H = () => {
+    process.on("uncaughtExceptionMonitor", $), process.on("unhandledRejection", $), process.on("SIGINT", a2), process.on("SIGTERM", a2), process.on("exit", S), g2 && g2.addEventListener("abort", a2);
+  }, B = () => {
+    process.removeListener("uncaughtExceptionMonitor", $), process.removeListener("unhandledRejection", $), process.removeListener("SIGINT", a2), process.removeListener("SIGTERM", a2), process.removeListener("exit", S), g2 && g2.removeEventListener("abort", a2);
+  }, R2 = () => {
+    if (v === void 0) return;
+    u4 && n3.write(`
 `);
-    const r2 = wrapAnsi(p3, x2, {
+    const s = wrapAnsi(v, y, {
       hard: true,
       trim: false
     }).split(`
 `);
-    r2.length > 1 && n3.write(import_sisteransi2.cursor.up(r2.length - 1)), n3.write(import_sisteransi2.cursor.to(0)), n3.write(import_sisteransi2.erase.down());
-  }, C3 = (e) => e.replace(/\.+$/, ""), _2 = (e) => {
-    const r2 = (performance.now() - e) / 1e3, t2 = Math.floor(r2 / 60), o2 = Math.floor(r2 % 60);
-    return t2 > 0 ? `[${t2}m ${o2}s]` : `[${o2}s]`;
-  }, N = I2.withGuide ?? settings.withGuide, P3 = (e = "") => {
-    d = true, M2 = block({ output: n3 }), s = C3(e), w = performance.now(), N && n3.write(`${styleText2("gray", S_BAR)}
+    s.length > 1 && n3.write(cursor.up(s.length - 1)), n3.write(cursor.to(0)), n3.write(erase.down());
+  }, L = (e) => e.replace(/\.+$/, ""), T3 = (e) => {
+    const s = (performance.now() - e) / 1e3, i2 = Math.floor(s / 60), t2 = Math.floor(s % 60);
+    return i2 > 0 ? `[${i2}m ${t2}s]` : `[${t2}s]`;
+  }, N = E2.withGuide ?? settings.withGuide, P3 = (e = "") => {
+    if (p3 = true, l = false, r2 = L(e), w = performance.now(), H(), h2) {
+      r2 !== "" && n3.write(`${r2}
+`), I = setInterval(() => {
+        n3.write(r2 === "" ? `still working
+` : `still working: ${r2}
 `);
-    let r2 = 0, t2 = 0;
-    A2(), T3 = setInterval(() => {
-      if (u5 && s === p3)
+      }, Y);
+      return;
+    }
+    x2 = block({ output: n3 }), N && n3.write(`${styleText2("gray", S_BAR)}
+`);
+    let s = 0, i2 = 0;
+    I = setInterval(() => {
+      if (u4 && r2 === v)
         return;
-      y2(), p3 = s;
-      const o2 = k(E2[r2]);
-      let v;
-      if (u5)
-        v = `${o2}  ${s}...`;
-      else if (l2 === "timer")
-        v = `${o2}  ${s} ${_2(w)}`;
+      R2(), v = r2;
+      const t2 = F(M2[s]);
+      let o2;
+      if (u4)
+        o2 = `${t2}  ${r2}...`;
+      else if (c3 === "timer")
+        o2 = `${t2}  ${r2} ${T3(w)}`;
       else {
-        const B = ".".repeat(Math.floor(t2)).slice(0, 3);
-        v = `${o2}  ${s}${B}`;
+        const j2 = ".".repeat(Math.floor(i2)).slice(0, 3);
+        o2 = `${t2}  ${r2}${j2}`;
       }
-      const j2 = wrapAnsi(v, x2, {
+      const D = wrapAnsi(o2, y, {
         hard: true,
         trim: false
       });
-      n3.write(j2), r2 = r2 + 1 < E2.length ? r2 + 1 : 0, t2 = t2 < 4 ? t2 + 0.125 : 0;
-    }, F);
-  }, a2 = (e = "", r2 = 0, t2 = false) => {
-    if (!d) return;
-    d = false, clearInterval(T3), y2();
-    const o2 = r2 === 0 ? styleText2("green", S_STEP_SUBMIT) : r2 === 1 ? styleText2("red", S_STEP_CANCEL) : styleText2("red", S_STEP_ERROR);
-    s = e ?? s, t2 || (l2 === "timer" ? n3.write(`${o2}  ${s} ${_2(w)}
-`) : n3.write(`${o2}  ${s}
-`)), H(), M2();
+      n3.write(D), s = s + 1 < M2.length ? s + 1 : 0, i2 = i2 < 4 ? i2 + 0.125 : 0;
+    }, O);
+  }, m3 = (e = "", s = 0, i2 = false) => {
+    if (p3) {
+      if (p3 = false, l = s === 1, clearInterval(I), h2 || R2(), r2 = e ?? r2, !i2)
+        if (h2) {
+          const t2 = s === 1 ? _2 ?? settings.messages.cancel : s === 2 ? C4 ?? settings.messages.error : "Done", o2 = r2 || t2;
+          c3 === "timer" ? n3.write(`${o2} ${T3(w)}
+`) : n3.write(`${o2}
+`);
+        } else {
+          const t2 = s === 0 ? styleText2("green", S_STEP_SUBMIT) : s === 1 ? styleText2("red", S_STEP_CANCEL) : styleText2("red", S_STEP_ERROR);
+          c3 === "timer" ? n3.write(`${t2}  ${r2} ${T3(w)}
+`) : n3.write(`${t2}  ${r2}
+`);
+        }
+      B(), x2?.();
+    }
   };
   return {
     start: P3,
-    stop: (e = "") => a2(e, 0),
+    stop: (e = "") => m3(e, 0),
     message: (e = "") => {
-      s = C3(e ?? s);
+      r2 = L(e ?? r2);
     },
-    cancel: (e = "") => a2(e, 1),
-    error: (e = "") => a2(e, 2),
-    clear: () => a2("", 0, true),
+    cancel: (e = "") => m3(e, 1),
+    error: (e = "") => m3(e, 2),
+    clear: () => m3("", 0, true),
     get isCancelled() {
-      return S;
+      return l;
     }
   };
 };
-var u4 = {
+var u3 = {
   light: unicodeOr("\u2500", "-"),
   heavy: unicodeOr("\u2501", "="),
   block: unicodeOr("\u2588", "#")
@@ -4487,7 +4491,7 @@ function progress({
 } = {}) {
   const r2 = spinner(x2);
   let a2 = 0, n3 = "";
-  const c3 = Math.max(1, d), l2 = Math.max(1, v), S = (t2) => {
+  const c3 = Math.max(1, d), l = Math.max(1, v), S = (t2) => {
     switch (t2) {
       case "initial":
       case "active":
@@ -4501,8 +4505,8 @@ function progress({
         return (e) => styleText2("magenta", e);
     }
   }, p3 = (t2, e) => {
-    const m3 = Math.floor(a2 / c3 * l2);
-    return `${S(t2)(u4[o2].repeat(m3))}${styleText2("dim", u4[o2].repeat(l2 - m3))} ${e}`;
+    const m3 = Math.floor(a2 / c3 * l);
+    return `${S(t2)(u3[o2].repeat(m3))}${styleText2("dim", u3[o2].repeat(l - m3))} ${e}`;
   }, h2 = (t2 = "") => {
     n3 = t2, r2.start(p3("initial", t2));
   }, g2 = (t2 = 1, e) => {
@@ -4515,7 +4519,9 @@ function progress({
     error: r2.error,
     clear: r2.clear,
     advance: g2,
-    isCancelled: r2.isCancelled,
+    get isCancelled() {
+      return r2.isCancelled;
+    },
     message: (t2) => g2(0, t2)
   };
 }
@@ -4557,7 +4563,7 @@ var select = (t2) => {
         t2.message,
         s,
         m3
-      ), u5 = `${n3 ? `${styleText2("gray", S_BAR)}
+      ), u4 = `${n3 ? `${styleText2("gray", S_BAR)}
 ` : ""}${i2}
 `;
       switch (this.state) {
@@ -4567,7 +4573,7 @@ var select = (t2) => {
             o2(this.options[this.cursor], "selected"),
             r2
           );
-          return `${u5}${a2}`;
+          return `${u4}${a2}`;
         }
         case "cancel": {
           const r2 = n3 ? `${styleText2("gray", S_BAR)}  ` : "", a2 = wrapTextWithPrefix(
@@ -4575,14 +4581,14 @@ var select = (t2) => {
             o2(this.options[this.cursor], "cancelled"),
             r2
           );
-          return `${u5}${a2}${n3 ? `
+          return `${u4}${a2}${n3 ? `
 ${styleText2("gray", S_BAR)}` : ""}`;
         }
         default: {
-          const r2 = n3 ? `${styleText2("cyan", S_BAR)}  ` : "", a2 = u5.split(`
-`).length, p3 = d ? formatInstructionFooter(SELECT_INSTRUCTIONS, n3) : n3 ? [styleText2("cyan", S_BAR_END)] : [], f2 = p3.join(`
+          const r2 = n3 ? `${styleText2("cyan", S_BAR)}  ` : "", a2 = u4.split(`
+`).length, p3 = d ? formatInstructionFooter(t2.output, SELECT_INSTRUCTIONS, n3) : n3 ? [styleText2("cyan", S_BAR_END)] : [], f2 = p3.join(`
 `), b3 = p3.length + 1;
-          return `${u5}${r2}${limitOptions({
+          return `${u4}${r2}${limitOptions({
             output: t2.output,
             cursor: this.cursor,
             options: this.options,
@@ -4599,36 +4605,36 @@ ${f2}
     }
   }).prompt();
 };
-var selectKey = (t2) => {
+var selectKey = (i2) => {
   const c3 = (e, a2 = "inactive") => {
     if (e === void 0)
       return "";
     const n3 = e.label ?? String(e.value);
-    return a2 === "selected" ? `${styleText2("dim", n3)}` : a2 === "cancelled" ? `${styleText2(["strikethrough", "dim"], n3)}` : a2 === "active" ? `${styleText2(["bgCyan", "gray"], ` ${e.value} `)} ${n3}${e.hint ? ` ${styleText2("dim", `(${e.hint})`)}` : ""}` : `${styleText2(["gray", "bgWhite", "inverse"], ` ${e.value} `)} ${n3}${e.hint ? ` ${styleText2("dim", `(${e.hint})`)}` : ""}`;
+    return a2 === "disabled" ? `${styleText2("dim", ` ${e.value} `)} ${styleText2("gray", n3)}${e.hint ? ` ${styleText2("dim", `(${e.hint})`)}` : ""}` : a2 === "selected" ? `${styleText2("dim", n3)}` : a2 === "cancelled" ? `${styleText2(["strikethrough", "dim"], n3)}` : a2 === "active" ? `${styleText2(["bgCyan", "gray"], ` ${e.value} `)} ${n3}${e.hint ? ` ${styleText2("dim", `(${e.hint})`)}` : ""}` : `${styleText2(["gray", "bgWhite", "inverse"], ` ${e.value} `)} ${n3}${e.hint ? ` ${styleText2("dim", `(${e.hint})`)}` : ""}`;
   };
-  return new u3({
-    options: t2.options,
-    signal: t2.signal,
-    input: t2.input,
-    output: t2.output,
-    initialValue: t2.initialValue,
-    caseSensitive: t2.caseSensitive,
+  return new c({
+    options: i2.options,
+    signal: i2.signal,
+    input: i2.input,
+    output: i2.output,
+    initialValue: i2.initialValue,
+    caseSensitive: i2.caseSensitive,
     render() {
-      const e = t2.withGuide ?? settings.withGuide, a2 = `${e ? `${styleText2("gray", S_BAR)}
-` : ""}${symbol(this.state)}  ${t2.message}
+      const e = i2.withGuide ?? settings.withGuide, a2 = `${e ? `${styleText2("gray", S_BAR)}
+` : ""}${symbol(this.state)}  ${i2.message}
 `;
       switch (this.state) {
         case "submit": {
-          const n3 = e ? `${styleText2("gray", S_BAR)}  ` : "", r2 = this.options.find((u5) => u5.value === this.value) ?? t2.options[0], l2 = wrapTextWithPrefix(
-            t2.output,
+          const n3 = e ? `${styleText2("gray", S_BAR)}  ` : "", r2 = this.options.find((l) => l.value === this.value) ?? i2.options[0], u4 = wrapTextWithPrefix(
+            i2.output,
             c3(r2, "selected"),
             n3
           );
-          return `${a2}${l2}`;
+          return `${a2}${u4}`;
         }
         case "cancel": {
           const n3 = e ? `${styleText2("gray", S_BAR)}  ` : "", r2 = wrapTextWithPrefix(
-            t2.output,
+            i2.output,
             c3(this.options[0], "cancelled"),
             n3
           );
@@ -4636,15 +4642,18 @@ var selectKey = (t2) => {
 ${styleText2("gray", S_BAR)}` : ""}`;
         }
         default: {
-          const n3 = e ? `${styleText2("cyan", S_BAR)}  ` : "", r2 = e ? styleText2("cyan", S_BAR_END) : "", l2 = this.options.map(
-            (u5, d) => wrapTextWithPrefix(
-              t2.output,
-              c3(u5, d === this.cursor ? "active" : "inactive"),
+          const n3 = e ? `${styleText2("cyan", S_BAR)}  ` : "", r2 = e ? styleText2("cyan", S_BAR_END) : "", u4 = this.options.map(
+            (l, $) => wrapTextWithPrefix(
+              i2.output,
+              c3(
+                l,
+                l.disabled ? "disabled" : $ === this.cursor ? "active" : "inactive"
+              ),
               n3
             )
           ).join(`
 `);
-          return `${a2}${l2}
+          return `${a2}${u4}
 ${r2}
 `;
         }
@@ -4654,9 +4663,9 @@ ${r2}
 };
 var i = `${styleText2("gray", S_BAR)}  `;
 var stream = {
-  message: async (e, { symbol: l2 = styleText2("gray", S_BAR) } = {}) => {
+  message: async (e, { symbol: l = styleText2("gray", S_BAR) } = {}) => {
     process.stdout.write(`${styleText2("gray", S_BAR)}
-${l2}  `);
+${l}  `);
     let s = 3;
     for await (let r2 of e) {
       r2 = r2.replace(/\n/g, `
@@ -4687,11 +4696,11 @@ var tasks = async (o2, e) => {
     s.stop(n3 || t2.title);
   }
 };
-var A = (l2) => l2.replace(/\x1b\[(?:\d+;)*\d*[ABCDEFGHfJKSTsu]|\x1b\[(s|u)/g, "");
-var taskLog = (l2) => {
-  const r2 = l2.output ?? process.stdout, O = getColumns(r2), i2 = styleText2("gray", S_BAR), p3 = l2.spacing ?? 1, k = 3, m3 = l2.retainLog === true, d = !isCI() && isTTY(r2);
+var A = (l) => l.replace(/\x1b\[(?:\d+;)*\d*[ABCDEFGHfJKSTsu]|\x1b\[(s|u)/g, "");
+var taskLog = (l) => {
+  const r2 = l.output ?? process.stdout, O = getColumns(r2), i2 = styleText2("gray", S_BAR), p3 = l.spacing ?? 1, k = 3, m3 = l.retainLog === true, d = !isCI() && isTTY(r2);
   r2.write(`${i2}
-`), r2.write(`${styleText2("green", S_STEP_SUBMIT)}  ${l2.title}
+`), r2.write(`${styleText2("green", S_STEP_SUBMIT)}  ${l.title}
 `);
   for (let e = 0; e < p3; e++)
     r2.write(`${i2}
@@ -4719,7 +4728,7 @@ ${t2.header}`);
 `).reduce((b3, w) => w === "" ? b3 + 1 : b3 + Math.ceil((w.length + k) / O), 0);
       s += E2;
     }
-    s > 0 && (s += 1, r2.write(import_sisteransi2.erase.lines(s)));
+    s > 0 && (s += 1, r2.write(erase.lines(s)));
   }, h2 = (e, s, t2) => {
     const o2 = t2 ? `${e.full}
 ${e.value}` : e.value;
@@ -4749,9 +4758,9 @@ ${e.value}` : e.value;
     }
   }, L = (e, s, t2) => {
     if (f2(false), (t2?.raw !== true || !v) && e.value !== "" && (e.value += `
-`), e.value += A(s), v = t2?.raw === true, l2.limit !== void 0) {
+`), e.value += A(s), v = t2?.raw === true, l.limit !== void 0) {
       const o2 = e.value.split(`
-`), a2 = o2.length - l2.limit;
+`), a2 = o2.length - l.limit;
       if (a2 > 0) {
         const g2 = o2.splice(0, a2);
         m3 && (e.full += (e.full === "" ? "" : `
@@ -4761,12 +4770,12 @@ ${e.value}` : e.value;
       e.value = o2.join(`
 `);
     }
-    d && y2();
-  }, y2 = () => {
+    d && y();
+  }, y = () => {
     for (const e of n3)
       e.result ? e.result.status === "error" ? log.error(e.result.message, { output: r2, secondarySymbol: i2, spacing: 0 }) : log.success(e.result.message, { output: r2, secondarySymbol: i2, spacing: 0 }) : e.value !== "" && h2(e, 0);
   }, B = (e, s) => {
-    f2(false), e.result = s, d && y2();
+    f2(false), e.result = s, d && y();
   };
   return {
     message(e, s) {
@@ -4813,7 +4822,7 @@ var text = (t2) => new n2({
   signal: t2.signal,
   input: t2.input,
   render() {
-    const r2 = t2?.withGuide ?? settings.withGuide, l2 = `${`${r2 ? `${styleText2("gray", S_BAR)}
+    const r2 = t2?.withGuide ?? settings.withGuide, l = `${`${r2 ? `${styleText2("gray", S_BAR)}
 ` : ""}${symbol(this.state)}  `}${t2.message}
 `, d = t2.placeholder && t2.placeholder.length > 0 ? (
       // biome-ignore lint/style/noNonNullAssertion: guarded by placeholder.length > 0
@@ -4822,29 +4831,29 @@ var text = (t2) => new n2({
     switch (this.state) {
       case "validating": {
         const n3 = r2 ? `${styleText2("cyan", S_BAR)}  ` : "", i2 = r2 ? styleText2("cyan", S_BAR_END) : "", c3 = styleText2("dim", o2), $ = styleText2("dim", "Validating...");
-        return `${l2}${n3}${c3}
+        return `${l}${n3}${c3}
 ${i2}  ${$}
 `;
       }
       case "error": {
         const n3 = this.error ? `  ${styleText2("yellow", this.error)}` : "", i2 = r2 ? `${styleText2("yellow", S_BAR)}  ` : "", c3 = r2 ? styleText2("yellow", S_BAR_END) : "";
-        return `${l2.trim()}
+        return `${l.trim()}
 ${i2}${o2}
 ${c3}${n3}
 `;
       }
       case "submit": {
         const n3 = s ? `${r2 ? "  " : ""}${styleText2("dim", s)}` : "", i2 = r2 ? styleText2("gray", S_BAR) : "";
-        return `${l2}${i2}${n3}`;
+        return `${l}${i2}${n3}`;
       }
       case "cancel": {
         const n3 = s ? `  ${styleText2(["strikethrough", "dim"], s)}` : "", i2 = r2 ? styleText2("gray", S_BAR) : "";
-        return `${l2}${i2}${n3}${s.trim() ? `
+        return `${l}${i2}${n3}${s.trim() ? `
 ${i2}` : ""}`;
       }
       default: {
         const n3 = r2 ? `${styleText2("cyan", S_BAR)}  ` : "", i2 = r2 ? styleText2("cyan", S_BAR_END) : "";
-        return `${l2}${n3}${o2}
+        return `${l}${n3}${o2}
 ${i2}
 `;
       }
@@ -5058,8 +5067,8 @@ function nodeTooOld(version) {
   const b3 = NODE_MIN.split(".");
   for (let i2 = 0; i2 < b3.length; i2++) {
     const x2 = Number(a2[i2] ?? 0) || 0;
-    const y2 = Number(b3[i2]);
-    if (x2 !== y2) return x2 < y2;
+    const y = Number(b3[i2]);
+    if (x2 !== y) return x2 < y;
   }
   return false;
 }
@@ -6381,8 +6390,8 @@ function isNonEOL(cp) {
 function isNonAscii(cp) {
   return CodePoint.PAD <= cp && cp <= CodePoint.CP_D7FF || CodePoint.CP_E000 <= cp && cp <= CodePoint.CP_10FFFF;
 }
-function isValidDate(y2, m3, d) {
-  if (y2 >= 0 && m3 <= 12 && m3 >= 1 && d >= 1) return d <= (m3 === 2 ? y2 & 3 || !(y2 % 25) && y2 & 15 ? 28 : 29 : 30 + (m3 + (m3 >> 3) & 1));
+function isValidDate(y, m3, d) {
+  if (y >= 0 && m3 <= 12 && m3 >= 1 && d >= 1) return d <= (m3 === 2 ? y & 3 || !(y % 25) && y & 15 ? 28 : 29 : 30 + (m3 + (m3 >> 3) & 1));
   return false;
 }
 function isValidTime(h2, m3, s) {
@@ -9117,9 +9126,9 @@ function sampleText() {
   const lines = [];
   let bytes = 0;
   for (let i2 = 0; bytes < SAMPLE_BYTES; i2++) {
-    const l2 = "context-mode doctor sample line " + i2;
-    lines.push(l2);
-    bytes += l2.length + 1;
+    const l = "context-mode doctor sample line " + i2;
+    lines.push(l);
+    bytes += l.length + 1;
   }
   return lines.join("\n") + "\n";
 }
@@ -9149,7 +9158,7 @@ function hookSample(id, cwd, text2) {
   }
 }
 function sampleVerdict(id, effect, text2, a2) {
-  const noProject = a2.stderr.split("\n").find((l2) => l2.startsWith(NO_PROJECT_LINE));
+  const noProject = a2.stderr.split("\n").find((l) => l.startsWith(NO_PROJECT_LINE));
   if (noProject !== void 0) return "NO_PROJECT: the hook did not resolve the project (" + noProject.trim() + ")";
   if (a2.status === null) return "hook did not finish";
   if (a2.status !== 0 && a2.status !== DENY_EXIT) return `hook exited ${a2.status}: ${a2.stderr.trim()}`;
@@ -9539,12 +9548,12 @@ function listState(row, env) {
     if (major >= 2) return { check: opencode2ListCheck(l0.bin, env), status: void 0 };
     l0 = { bin: l0.bin, args: opencodeListArgs(major) };
   }
-  const l2 = l0;
-  const r2 = runBin(l2.bin, l2.args, env);
+  const l = l0;
+  const r2 = runBin(l.bin, l.args, env);
   const out2 = `${r2.stdout}${r2.stderr}`;
   const ok = r2.status === 0 && out2.includes("context-mode");
-  const check = { name: "list", ok, detail: ok ? void 0 : `${l2.bin} ${l2.args.join(" ")} does not list context-mode` };
-  return { check, status: r2.status === 0 ? statusOf(row, `${r2.stdout}`) : void 0, broken: r2.status === 0 ? void 0 : hostBroken(l2.bin, out2) };
+  const check = { name: "list", ok, detail: ok ? void 0 : `${l.bin} ${l.args.join(" ")} does not list context-mode` };
+  return { check, status: r2.status === 0 ? statusOf(row, `${r2.stdout}`) : void 0, broken: r2.status === 0 ? void 0 : hostBroken(l.bin, out2) };
 }
 var DISABLE_ALL_HOOKS = "disableAllHooks";
 var SETTINGS_FILES = ["settings.json", "settings.local.json"];
@@ -9746,10 +9755,10 @@ function parseCheck(row) {
 function hookRegisteredCheck(row, env, list2) {
   const h2 = row.hookInstall;
   if (h2.kind === "package") {
-    const l2 = row.listCommand;
-    if (!l2) return { name: "hook-registered", ok: false, detail: `no list command for ${row.id}` };
-    if (!list2) return { name: "hook-registered", ok: false, detail: `${l2.bin} is not on PATH, so the hooks cannot be checked` };
-    return { name: "hook-registered", ok: list2.ok, detail: list2.ok ? void 0 : `${l2.bin} ${l2.args.join(" ")} does not list context-mode (hooks ship in ${h2.via})` };
+    const l = row.listCommand;
+    if (!l) return { name: "hook-registered", ok: false, detail: `no list command for ${row.id}` };
+    if (!list2) return { name: "hook-registered", ok: false, detail: `${l.bin} is not on PATH, so the hooks cannot be checked` };
+    return { name: "hook-registered", ok: list2.ok, detail: list2.ok ? void 0 : `${l.bin} ${l.args.join(" ")} does not list context-mode (hooks ship in ${h2.via})` };
   }
   const edits = [];
   try {
@@ -10051,13 +10060,13 @@ async function verifyRow(row, ctx) {
   const env = ctx.env;
   const checks = [parseCheck(row)];
   const ls = listState(row, env);
-  const l2 = ls.check;
-  if (l2) checks.push(l2);
+  const l = ls.check;
+  if (l) checks.push(l);
   const cp = copyCheck(row, ctx.pkgDir);
   if (cp) checks.push(cp);
   checks.push(await mcpCheck(row.serverCommand, env));
   if (row.hookCommand) checks.push(hookCheck(row, env));
-  checks.push(hookRegisteredCheck(row, env, l2));
+  checks.push(hookRegisteredCheck(row, env, l));
   const en = hookEnabledCheck(row, ls.status);
   if (en) checks.push(en);
   if (row.copilotSettings) checks.push(await copilotEnabledCheck(row, ctx));
@@ -10613,9 +10622,9 @@ async function finish(ui, command, res, writeReport) {
   if (ui.f.json) out(JSON.stringify({ command, ...res }));
   else if (ui.clack) ui.clack.note(table(res.agents), "Summary");
   else out(table(res.agents));
-  if (ui.f.verbose && !ui.f.json) for (const l2 of verboseLines(res.agents)) err(l2);
+  if (ui.f.verbose && !ui.f.json) for (const l of verboseLines(res.agents)) err(l);
   if (res.error) err(`FAIL ${command}: ${res.error}. Fix: context-mode ${command}${command === "setup" ? " --repair" : ""}`);
-  for (const l2 of failLines(res.agents)) err(l2);
+  for (const l of failLines(res.agents)) err(l);
   if (res.exitCode !== EXIT_OK) await report(ui, command, res, writeReport);
   return res.exitCode;
 }
@@ -10857,6 +10866,7 @@ var EXIT_USAGE2 = 2;
 var EXIT_SIGINT2 = 130;
 var SERVER_FILE = "server.mjs";
 var HOOK_FILE = "hook.mjs";
+var DAEMON_FILE = "daemon.mjs";
 var PACKAGE_FILE = "package.json";
 var V1_PLATFORM_AGENT = Object.freeze({
   "claude-code": "claude-code",
@@ -10880,6 +10890,7 @@ function route(argv, version) {
   if (cmd === void 0 || cmd === "-h" || cmd === "--help" || cmd === "help") return { kind: "exit", code: EXIT_OK2, stdout: HELP2 };
   if (cmd === "-v" || cmd === "--version") return { kind: "exit", code: EXIT_OK2, stdout: version + "\n" };
   if (cmd === "server" || cmd === "mcp") return { kind: "run", file: SERVER_FILE, args: rest };
+  if (cmd === "daemon") return { kind: "run", file: DAEMON_FILE, args: rest };
   if (cmd === "hook") {
     if (rest.includes(AGENT_ARG)) return { kind: "run", file: HOOK_FILE, args: rest };
     const [platform = ""] = rest;

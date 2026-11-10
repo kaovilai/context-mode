@@ -278,6 +278,27 @@ Each agent uses its own install command, and [ADR-0023](docs/architecture/adr/AD
 
 Your first task with the plugin, step by step: [First session](https://contextmode.ai/docs/engine/first-session?utm_source=github&utm_medium=readme&utm_content=install-next). Or paste a prompt from [Try it](#try-it) right now.
 
+## Many sessions, one process
+
+Every session starts its own MCP server by default. On a machine that runs many sessions at once, the
+shared daemon serves them all from one process over loopback HTTP — opt-in, the stdio spawn stays the
+default:
+
+```sh
+context-mode daemon --install
+```
+
+```sh
+claude mcp add --transport http context-mode http://127.0.0.1:8790/mcp
+```
+
+With the plugin installed this adds a SECOND registration next to its stdio server — remove one
+(`claude mcp remove context-mode`, or uninstall the plugin, which also removes its hooks and skills).
+
+One process serves every session and every project; each session keeps its own session scope when
+its client names the session (see docs/daemon.md). Steps for other agents, per-project wiring, the
+doctor check and removal: docs/daemon.md in this repo.
+
 ## Try it
 
 Paste one of these prompts into your agent after the install. Each one ran once, live, in Claude Code 2.1.312, and its answer matched the source data ([evidence and rerun steps](bench/evidence/try-it-2026-11-02/README.md)). The headline numbers in [Benchmarks](#benchmarks) use the median of 5 runs. Other agents do the same job with the same tools: `ctx_execute`, `ctx_index` and `ctx_search`.
@@ -573,6 +594,7 @@ Commands in the agent: `/ctx-stats` shows the `ctx_stats` result, `/ctx-doctor` 
 | Fetch of a URL, for `ctx_index` | Your agent asks for a page. The fetch blocks private and link-local addresses, checks each address the host name points to, connects to the address it checked, and checks again at each redirect. | [fetch.ts](src/core/sandbox/fetch.ts) |
 | One read of the npm dist-tags, with `git ls-remote` of the release tags as the fallback | You run `context-mode doctor`, to check for a new version | [doctor-env.ts](src/core/ops/doctor-env.ts) |
 | `npm i -g context-mode`, or `gh issue create` | You run `context-mode upgrade`, or you press a key to send the debug report | [commands.ts](src/cli/commands.ts) |
+| A loopback listen on 127.0.0.1, and its health probe | You opt into the [shared daemon](#many-sessions-one-process) | [daemon.ts](src/entries/daemon.ts) |
 | Your agent's own install command, npm or git | You install or update | Your agent |
 
 - The guard test D-PRIVACY-NET-1 in [tests/0008-enforcement.test.mjs](tests/0008-enforcement.test.mjs) scans the source for HTTP clients, sockets, DNS lookups, git network calls and gh or npm spawns. It flags each new call site, so this table stays true.
