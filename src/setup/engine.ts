@@ -15,7 +15,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { claudeDirOf, codexDirOf, copilotDirOf, dataRootOf, geminiDirOf, kiroDirOf, opencodeDirOf } from "../core/project/config-dir.ts";
-import { AGENT_HOME_DIR, D2_NODE_DETAIL, D2_NODE_FIX, D2_SQLITE_DETAIL, D2_SQLITE_FIX, DB_FILE_NAME, MCP_ENV_FIELD, MCP_ENV_VARS_FIELD, MCP_TOOLS_FIELD, SETUP_MANIFEST_FILE, NATIVE_INSTALL, OPENCODE_CONFIG_FILES, OPENCODE_PLUGIN_KEY, OPENCODE_PLUGINS_KEY, OPENCODE_PLUGIN_PATH, PROJECTS_DIR_NAME, SERVER_KEY, TOOL_ORDER, UPGRADE_REPORT_ONLY_REASONS } from "../core/contracts/constants.ts";
+import { AGENT_HOME_DIR, D2_NODE_DETAIL, D2_NODE_FIX, D2_SQLITE_DETAIL, D2_SQLITE_FIX, DB_FILE_NAME, DAEMON_CHECK_DOWN_DETAIL, DAEMON_CHECK_FIX, DAEMON_CHECK_PASS_DETAIL, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PROBE_TIMEOUT_MS, MCP_ENV_FIELD, MCP_ENV_VARS_FIELD, MCP_TOOLS_FIELD, SETUP_MANIFEST_FILE, NATIVE_INSTALL, OPENCODE_CONFIG_FILES, OPENCODE_PLUGIN_KEY, OPENCODE_PLUGINS_KEY, OPENCODE_PLUGIN_PATH, PROJECTS_DIR_NAME, SERVER_KEY, TOOL_ORDER, UPGRADE_REPORT_ONLY_REASONS, daemonUrlOf } from "../core/contracts/constants.ts";
+import { daemonConfiguredPort } from "../core/ops/daemon-state.ts";
 import { CtxError, formatError } from "../core/contracts/errors.ts";
 import { nodeTooOld } from "../core/hooks/fallback.ts";
 import { ADAPTERS, getAdapter } from "../adapters/table.ts";
@@ -635,6 +636,24 @@ function mcpCheck(cmd: string[], env: SetupContext["env"]): Promise<Check> {
   });
 }
 
+/** The claude-code plugin's MCP entry is the shared daemon over HTTP (build/manifests.ts claudeMcpManifest),
+ * so mcpCheck — which spawns the bundle — can pass while the daemon the plugin actually needs is stopped.
+ * Probes the same endpoint the plugin's URL expands to (${CONTEXT_MODE_DAEMON_PORT:-8790}), the /healthz
+ * probe of doctor D12. A daemon that does not answer is a WARNING, not a FAIL: a FAIL check rolls the whole
+ * install back (a fresh machine installs the plugin first, the daemon after), and the row names the fix. */
+async function daemonCheck(env: SetupContext["env"]): Promise<Check> {
+  const port = daemonConfiguredPort(env);
+  const url = `http://${DAEMON_HOST}:${port}${DAEMON_HEALTH_PATH}`;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(DAEMON_PROBE_TIMEOUT_MS), redirect: "manual" });
+    // Anything that is not the daemon's own 204 is not a healthy daemon (the same verdict as D12).
+    if (r.status === 204) return { name: "daemon", ok: true, detail: `${DAEMON_CHECK_PASS_DETAIL} at ${daemonUrlOf(port)}` };
+    return { name: "daemon", ok: true, warn: true, detail: `${daemonUrlOf(port)} answered HTTP ${r.status}, not the daemon's 204. Fix: ${DAEMON_CHECK_FIX}` };
+  } catch {
+    return { name: "daemon", ok: true, warn: true, detail: `${DAEMON_CHECK_DOWN_DETAIL}. Fix: ${DAEMON_CHECK_FIX}` };
+  }
+}
+
 function hookRound(row: CheckRow, env: SetupContext["env"]): Check {
   const cmd = row.hookRunCommand; // absolute node: the written line may use bare node (D-C166-WIN-FIRE-2)
   const input = JSON.stringify(row.goldenPayload);
@@ -1011,6 +1030,7 @@ async function verifyRow(row: CheckRow, ctx: SetupContext): Promise<Check[]> {
   const cp = copyCheck(row, ctx.pkgDir);
   if (cp) checks.push(cp);
   checks.push(await mcpCheck(row.serverCommand, env));
+  if (row.installMode === "marketplace") checks.push(await daemonCheck(env)); // the plugin's MCP entry is the daemon, not the bundle
   if (row.hookCommand) checks.push(hookCheck(row, env));
   checks.push(hookRegisteredCheck(row, env, l));
   const en = hookEnabledCheck(row, ls.status);

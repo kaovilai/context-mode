@@ -4,6 +4,7 @@
 import { describe, test } from "node:test";
 import { CONC } from "./_lib/concurrency.mjs";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import assert from "node:assert/strict";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -413,6 +414,39 @@ exit 0`;
     assert.equal(doc.agents[0].status, "PASS", JSON.stringify(doc.agents[0], null, 2));
     assert.equal(doc.agents[0].bin, real, "doctor names the binary it ran");
     assert.equal(existsSync(ran), false, "the shim never ran");
+  });
+
+  // The plugin's MCP entry is the daemon over HTTP (build/manifests.ts claudeMcpManifest), so verify also
+  // probes it: mcpCheck spawns the bundle and passes with the daemon stopped. A live daemon = the daemon's
+  // own /healthz 204; down = a warning row with the D12 fix (a FAIL would roll the install back).
+  test("[daemon-check] claude-code: verify probes the daemon the plugin needs — ok on a live /healthz, warn with the fix when down", { skip: process.platform === "win32" && "fake agent binaries are sh scripts" }, async (t) => {
+    const s = sandbox(t);
+    fakeClaude(s.root, s.bin, CLAUDE_FAKE(path.join(s.root, "claude.state")));
+    const server = createServer((req, res) => { res.writeHead(req.url === "/healthz" ? 204 : 404).end(); });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    t.after(() => server.close());
+    // A port nothing listens on: bind one, note it, close it, never rebind.
+    const probe = createServer();
+    await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const deadPort = probe.address().port;
+    await new Promise((resolve) => probe.close(resolve));
+    const up = await runSetup({ home: s.home, pkgDir: s.pkgDir, env: { ...s.env, CONTEXT_MODE_DAEMON_PORT: String(port) }, agents: ["claude-code"], runId: "d1" });
+    assert.equal(up.agents[0].status, "PASS", JSON.stringify(up.agents[0], null, 2));
+    const upCheck = up.agents[0].checks.find((c) => c.name === "daemon");
+    assert.ok(upCheck, "daemon check present for the marketplace row");
+    assert.equal(upCheck.ok, true);
+    assert.equal(upCheck.warn, undefined, JSON.stringify(upCheck));
+    assert.match(upCheck.detail, /shared daemon reachable/);
+    const down = await runSetup({ home: s.home, pkgDir: s.pkgDir, env: { ...s.env, CONTEXT_MODE_DAEMON_PORT: String(deadPort) }, agents: ["claude-code"], runId: "d2" });
+    assert.equal(down.agents[0].status, "PASS", "a stopped daemon is a warning, not a rollback");
+    const downCheck = down.agents[0].checks.find((c) => c.name === "daemon");
+    assert.ok(downCheck);
+    assert.equal(downCheck.ok, true);
+    assert.equal(downCheck.warn, true, JSON.stringify(downCheck));
+    assert.match(downCheck.detail, /context-mode daemon --install/);
+    const codex = await runSetup({ home: s.home, pkgDir: s.pkgDir, env: { ...s.env, CONTEXT_MODE_DAEMON_PORT: String(deadPort) }, agents: ["codex"], runId: "d3" });
+    assert.equal(codex.agents[0].checks.some((c) => c.name === "daemon"), false, "non-marketplace rows keep no daemon row");
   });
 
   test("[H8] setup: only a shim on PATH is a FAIL that names the shim; the shim never runs", { skip: process.platform === "win32" && "fake agent binaries are sh scripts" }, async (t) => {
