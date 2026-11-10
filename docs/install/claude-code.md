@@ -32,7 +32,7 @@ To do the setup step by hand, run `context-mode setup --print claude-code` and f
 ## What setup changes
 
 - Runs `claude plugin marketplace add` on the installed package folder, then `claude plugin install context-mode@context-mode`.
-- The plugin brings the MCP server, the hooks (`hooks/claude-code.json`: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse) and the skills `/ctx-doctor`, `/ctx-stats` and `/ctx-upgrade`.
+- The plugin brings the hooks (`hooks/claude-code.json`: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse) and the skills `/ctx-doctor`, `/ctx-stats` and `/ctx-upgrade`. Its MCP entry connects to the shared daemon over loopback HTTP (`http://127.0.0.1:8790/mcp`) instead of spawning a per-session stdio bridge, so the daemon must be running: `context-mode daemon --install` (doctor D12 names the fix when it is not).
 - Removes old context-mode hook commands from `~/.claude/settings.json`.
 - Effect: the call runs, then a large result is replaced by a short selection that names `ctx_search` (replace).
 - Backs up each file first. A failed step is rolled back byte for byte.

@@ -2,10 +2,13 @@
 
 By default every agent session starts its own context-mode MCP server (stdio). On a machine that runs
 many sessions at once — T3 Code threads, a stack of terminal tabs — that is RAM × sessions. The shared
-daemon is the opt-in fix: one process serves every session over loopback HTTP, so the cost stops
-scaling. See [ADR-0026](architecture/adr/0026-shared-http-daemon.md) for the design.
+daemon is the fix: one process serves every session over loopback HTTP, so the cost stops scaling. See
+[ADR-0026](architecture/adr/0026-shared-http-daemon.md) for the design.
 
-The daemon is opt-in. Nothing changes until you run it: the stdio spawn stays the default.
+The daemon is opt-in for every surface but one: the Claude Code **plugin** connects straight to the
+daemon's URL (`http://127.0.0.1:8790/mcp`) instead of spawning a per-session stdio bridge, so it needs
+the daemon running (`context-mode daemon --install`; doctor D12 names the fix when it is not). Every
+other host keeps the stdio spawn as its default: nothing changes until you run the daemon.
 
 ## What you need
 
