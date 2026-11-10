@@ -345,12 +345,12 @@ describe("ADR-0018 build: manifests", () => {
   });
 
   const AUTHOR = { name: DEV.author, url: DEV.homepage }; // D-R33-CC-META-1 (claude-code-7)
-  test("plugin and extension manifests carry name, dev version and the --agent MCP entry", (t) => {
+  test("plugin and extension manifests carry name, dev version and the MCP entry", (t) => {
     const dir = scratch(t);
     generateManifests(dir);
     const entry = (id) => ({ "context-mode": { command: "node", args: ["server.mjs", "--agent", id] } });
-    // D-M3-F-5: Claude Code runs the plugin server with cwd = the project, so the path names the plugin root.
-    const claudeEntry = { "context-mode": { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/server.mjs", "--agent", "claude-code"] } };
+    // ADR-0026: the Claude Code plugin connects to the shared daemon over loopback HTTP; no per-session stdio bridge.
+    const claudeEntry = { "context-mode": { type: "http", url: "http://127.0.0.1:8790/mcp" } };
     assert.deepEqual(readJson(dir, ".claude-plugin/plugin.json"), {
       author: AUTHOR, description: DEV.description, hooks: "./hooks/claude-code.json", mcpServers: claudeEntry, name: "context-mode", version: "0.0.0-dev", // D-R33-CC-SKILLS-1, D-R33-CC-META-1
     });
@@ -1111,11 +1111,19 @@ describe("ADR-0023 build: native host manifests", () => {
     }
   }
 
-  test("[ADR-0023] native/claude-code: packed .claude-plugin/plugin.json names shipped server, hooks and skills", () => {
+  function assertHttpServers(servers, label) {
+    const entry = servers["context-mode"];
+    assert.ok(entry, label + ": mcpServers.context-mode");
+    assert.equal(entry.type, "http", label + ": HTTP entry (ADR-0026, no per-session stdio bridge)");
+    assert.equal(entry.url, "http://127.0.0.1:8790/mcp", label + ": the shared daemon URL");
+    assert.equal(entry.command, undefined, label + ": no stdio command");
+  }
+
+  test("[ADR-0023] native/claude-code: packed .claude-plugin/plugin.json points at the shared daemon over HTTP, ships hooks and skills", () => {
     const m = json(pkg, ".claude-plugin/plugin.json");
     assert.equal(m.name, "context-mode");
     assert.equal(m.version, VERSION);
-    assertServers(pkg, m.mcpServers, "claude-code");
+    assertHttpServers(m.mcpServers, "claude-code");
     assertHooks(pkg, stripRoot(m.hooks), "claude-code");
     assert.equal(m.skills, undefined, "D-R33-CC-SKILLS-1: Claude Code loads the default skills/ dir");
     assertSkills(pkg, "./skills", "mcp__plugin_context-mode_context-mode__", "claude-code");
@@ -1202,7 +1210,7 @@ describe("ADR-0023 build: native host manifests", () => {
     const m = json(root, ".claude-plugin/plugin.json");
     assert.equal(m.name, "context-mode");
     assert.equal(m.version, VERSION);
-    assertServers(root, m.mcpServers, "claude-code-main");
+    assertHttpServers(m.mcpServers, "claude-code-main");
     assertHooks(root, stripRoot(m.hooks), "claude-code-main");
     assertSkills(root, "./skills", "mcp__plugin_context-mode_context-mode__", "claude-code-main"); // D-R33-CC-SKILLS-1
     for (const rel of ["run.mjs", "search.mjs", "SHA256SUMS"]) assert.ok(isFile(root, rel), "claude-code-main: " + rel);
