@@ -349,8 +349,14 @@ describe("ADR-0018 build: manifests", () => {
     const dir = scratch(t);
     generateManifests(dir);
     const entry = (id) => ({ "context-mode": { command: "node", args: ["server.mjs", "--agent", id] } });
-    // ADR-0026: the Claude Code plugin connects to the shared daemon over loopback HTTP; no per-session stdio bridge.
-    const claudeEntry = { "context-mode": { type: "http", url: "http://127.0.0.1:8790/mcp" } };
+    // ADR-0026: the Claude Code plugin connects to the shared daemon over loopback HTTP; no per-session stdio
+    // bridge. The url/header ${VAR} forms are Claude Code's .mcp.json expansion: the port follows the daemon's
+    // override env, and the session header forwards the host session id the hooks journal under (D-CR2-SID-1).
+    const claudeEntry = { "context-mode": {
+      headers: { "x-context-mode-session": "${CLAUDE_CODE_SESSION_ID}" },
+      type: "http",
+      url: "http://127.0.0.1:${CONTEXT_MODE_DAEMON_PORT:-8790}/mcp",
+    } };
     assert.deepEqual(readJson(dir, ".claude-plugin/plugin.json"), {
       author: AUTHOR, description: DEV.description, hooks: "./hooks/claude-code.json", mcpServers: claudeEntry, name: "context-mode", version: "0.0.0-dev", // D-R33-CC-SKILLS-1, D-R33-CC-META-1
     });
@@ -1115,7 +1121,8 @@ describe("ADR-0023 build: native host manifests", () => {
     const entry = servers["context-mode"];
     assert.ok(entry, label + ": mcpServers.context-mode");
     assert.equal(entry.type, "http", label + ": HTTP entry (ADR-0026, no per-session stdio bridge)");
-    assert.equal(entry.url, "http://127.0.0.1:8790/mcp", label + ": the shared daemon URL");
+    assert.equal(entry.url, "http://127.0.0.1:${CONTEXT_MODE_DAEMON_PORT:-8790}/mcp", label + ": the daemon URL, port following ${CONTEXT_MODE_DAEMON_PORT}");
+    assert.equal(entry.headers?.["x-context-mode-session"], "${CLAUDE_CODE_SESSION_ID}", label + ": the session header forwards the host session id (D-CR2-SID-1)");
     assert.equal(entry.command, undefined, label + ": no stdio command");
   }
 

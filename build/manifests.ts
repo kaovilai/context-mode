@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { ADAPTERS, hasReplace } from "../src/adapters/table.ts";
 import type { AgentId } from "../src/core/contracts/agents.ts";
-import { DAEMON_URL, KIRO_TOOL_MATCHERS, NODE_MIN, RELEASE_SUMS_FILE, SERVER_KEY } from "../src/core/contracts/constants.ts";
+import { DAEMON_DEFAULT_PORT, DAEMON_HOST, DAEMON_PATH, DAEMON_SESSION_HEADER, KIRO_TOOL_MATCHERS, NODE_MIN, RELEASE_SUMS_FILE, SERVER_KEY } from "../src/core/contracts/constants.ts";
 import type { AdapterRow } from "../src/core/contracts/types.ts";
 
 // Build-tool literals (same rule as build.mjs DEFAULT_OUT/BUNDLES; DEVIATIONS D-M3-A7-5).
@@ -158,16 +158,32 @@ function mcpManifest(row: AdapterRow, version: string): JsonObject {
 
 // ADR-0026 (fork, 2026-11-10): the Claude Code plugin connects straight to the shared daemon over loopback
 // HTTP instead of spawning a per-session stdio bridge (server.mjs). The daemon IS the MCP server (decision 1);
-// a user-scope `claude mcp add --transport http` entry at the same URL is the proven path, and A26-r14 steers
-// Claude Code onto the sessionful leg so workspace and session resolve per session. server.mjs still ships in
-// the plugin tree: it stays the stdio default for every other surface. The daemon must be running
-// (`context-mode daemon --install`, doctor D12) for the plugin's MCP entry to connect.
+// the user-scope `claude mcp add --transport http` entry is the proven path, and A26-r14 steers Claude Code
+// onto the sessionful leg so the workspace resolves per session. server.mjs still ships in the plugin tree:
+// it stays the stdio default for every other surface. The daemon must be running (`context-mode daemon
+// --install`, doctor D12) for the plugin's MCP entry to connect.
+// The URL and the session header use Claude Code's ${VAR}/${VAR:-default} expansion in .mcp.json url/headers
+// (documented; credential-named vars are the one exclusion and none of these is one):
+// - ${CONTEXT_MODE_DAEMON_PORT:-8790} keeps the plugin on the daemon's port when the override env is set
+//   (the same var `context-mode daemon` reads), defaulting to 8790.
+// - ${CLAUDE_CODE_SESSION_ID} forwards the host session id the hooks journal under (DEVIATIONS D-CR2-SID-1:
+//   set in the Claude Code process env, equal to the hook payload session_id). The daemon takes it from the
+//   x-context-mode-session header (DAEMON_SESSION_HEADER, ADR-0026 decision 3), so scope:"session" keeps
+//   seeing hook-indexed rows — the one thing the stdio bridge's env forwarding did that plain HTTP did not.
+//   The daemon validates the header value (sessionHeaderOf: [A-Za-z0-9._:-]{1,128}); an unexpanded literal
+//   fails that check and falls back to the transport session id, so a host without the expansion is no worse
+//   than the plain URL entry.
+const DAEMON_URL_TEMPLATE = `http://${DAEMON_HOST}:\${CONTEXT_MODE_DAEMON_PORT:-${DAEMON_DEFAULT_PORT}}${DAEMON_PATH}`;
 function claudeMcpManifest(row: AdapterRow, version: string): JsonObject {
   return {
     name: SERVER_KEY,
     version,
     description: devMeta().description,
-    mcpServers: { [SERVER_KEY]: { type: "http", url: DAEMON_URL } },
+    mcpServers: { [SERVER_KEY]: {
+      type: "http",
+      url: DAEMON_URL_TEMPLATE,
+      headers: { [DAEMON_SESSION_HEADER]: "${CLAUDE_CODE_SESSION_ID}" },
+    } },
   };
 }
 

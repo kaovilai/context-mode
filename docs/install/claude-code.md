@@ -32,7 +32,7 @@ To do the setup step by hand, run `context-mode setup --print claude-code` and f
 ## What setup changes
 
 - Runs `claude plugin marketplace add` on the installed package folder, then `claude plugin install context-mode@context-mode`.
-- The plugin brings the hooks (`hooks/claude-code.json`: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse) and the skills `/ctx-doctor`, `/ctx-stats` and `/ctx-upgrade`. Its MCP entry connects to the shared daemon over loopback HTTP (`http://127.0.0.1:8790/mcp`) instead of spawning a per-session stdio bridge, so the daemon must be running: `context-mode daemon --install` (doctor D12 names the fix when it is not).
+- The plugin brings the hooks (`hooks/claude-code.json`: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse) and the skills `/ctx-doctor`, `/ctx-stats` and `/ctx-upgrade`. Its MCP entry connects to the shared daemon over loopback HTTP instead of spawning a per-session stdio bridge, so the daemon must be running. On systemd, run `context-mode daemon --install`. Without systemd (macOS, Windows), run `context-mode daemon` in the foreground and keep it running. Setup and `context-mode doctor` report a `daemon` warning row with the same fix when it is not.
 - Removes old context-mode hook commands from `~/.claude/settings.json`.
 - Effect: the call runs, then a large result is replaced by a short selection that names `ctx_search` (replace).
 - Backs up each file first. A failed step is rolled back byte for byte.
@@ -64,6 +64,9 @@ It puts each touched file back. To remove the package too, see [Uninstall](./REA
 ## Known limits
 
 - The setup route adds the package folder from npm as a marketplace. The native route adds `mksglu/context-mode` from GitHub; use one of the two, not both.
+- The plugin's MCP entry needs the shared daemon. Its URL is `http://127.0.0.1:${CONTEXT_MODE_DAEMON_PORT:-8790}/mcp` (Claude Code expands `${VAR}`/`${VAR:-default}` in `.mcp.json`), so a daemon on the default port needs no configuration and `CONTEXT_MODE_DAEMON_PORT` moves both the daemon and the plugin entry. Set the variable, never set it to an empty string (an empty value expands to an invalid URL).
+- The entry also sends `x-context-mode-session: ${CLAUDE_CODE_SESSION_ID}`, so session-scoped search and `ctx_resume` keep seeing the hooks' rows, as the stdio spawn did. If the header ever arrives unexpanded, the daemon rejects the value (it does not match a session id) and falls back to the connection's own id; per-session identity is per Claude Code process.
+- `CONTEXT_MODE_DATA_DIR` set per profile (in that profile's settings `env`) routes the hooks' writes but not the daemon's: the daemon has one data root, from its own environment. Set `CONTEXT_MODE_DATA_DIR` on the daemon itself (its unit or the shell that starts it) so both agree; per-profile data separation is not supported through the plugin's daemon entry.
 - Verified live on Claude Code 2.1.274 without a login: `claude -p` against a local fake Anthropic endpoint ran our hook and the model saw the `ctx_search(` redirect for a 200 KB file (`tests/e2e/claude-code-fire.test.mjs`). A logged-in session was not run.
 - Hooks do not run when the plugin is disabled (`claude plugin enable context-mode@context-mode`; setup does this for you) or when `disableAllHooks` is `true` in a Claude Code settings file. Doctor fails with the fix for both; it never edits your settings.
 - `claude mcp add` by hand adds the MCP server only, with no hooks. Use `context-mode setup --print claude-code` instead.

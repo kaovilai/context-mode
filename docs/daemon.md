@@ -6,9 +6,12 @@ daemon is the fix: one process serves every session over loopback HTTP, so the c
 [ADR-0026](architecture/adr/0026-shared-http-daemon.md) for the design.
 
 The daemon is opt-in for every surface but one: the Claude Code **plugin** connects straight to the
-daemon's URL (`http://127.0.0.1:8790/mcp`) instead of spawning a per-session stdio bridge, so it needs
-the daemon running (`context-mode daemon --install`; doctor D12 names the fix when it is not). Every
-other host keeps the stdio spawn as its default: nothing changes until you run the daemon.
+daemon's URL instead of spawning a per-session stdio bridge, so it needs the daemon running (on
+systemd, `context-mode daemon --install`; without systemd, `context-mode daemon` in the foreground).
+The plugin's URL is `http://127.0.0.1:${CONTEXT_MODE_DAEMON_PORT:-8790}/mcp` — the same override
+variable the daemon reads — and it sends `x-context-mode-session: ${CLAUDE_CODE_SESSION_ID}`, so its
+session scope keeps matching the hooks. Every other host keeps the stdio spawn as its default:
+nothing changes until you run the daemon.
 
 ## What you need
 
@@ -89,10 +92,12 @@ Two consequences to know:
 
 - A host whose **hooks** journal rows under its own session id (Claude Code journals under
   `CLAUDE_CODE_SESSION_ID`) only matches those rows over the daemon when its MCP connection sends
-  that id — today that means a client that can set per-session headers
-  (`--header "x-context-mode-session: $CLAUDE_CODE_SESSION_ID"` in a config that expands it per
-  session). Claude Code's `claude mcp add` headers are static, so until it grows dynamic headers,
-  session-scoped hook continuity keeps requiring the stdio spawn; project scope is unaffected.
+  that id. The Claude Code **plugin** sends it: its manifest entry sets
+  `x-context-mode-session: ${CLAUDE_CODE_SESSION_ID}` through Claude Code's `.mcp.json` `${VAR}`
+  expansion (the value is the process's session id, the same one its hooks report; an unexpanded
+  header value is rejected by the daemon's id validation and falls back to the connection id). A
+  hand-added `claude mcp add` entry has static headers, so there the session-scoped hook continuity
+  still needs a per-session header or the stdio spawn; project scope is unaffected either way.
 - **Shared hosts:** loopback is not user-isolated — another OS user on the machine can also
   reach the port and call `ctx_execute` with the daemon owner's permissions, a broader exposure
   than spawning a stdio server as their own user. Do not run the daemon on a shared host without
@@ -134,3 +139,7 @@ context-mode daemon --remove
 - The daemon has no inbound auth: it binds loopback only, like the stdio spawn trusts the local user.
 - `ctx_upgrade` with mode `uninstall` stops the whole daemon (one process owns the data it removes).
 - A session that dies without a clean close leaves a small in-memory entry until the daemon restarts.
+- One data root per daemon, from the daemon's own environment. `CONTEXT_MODE_DATA_DIR` set in an
+  agent session's env (a Claude Code profile's settings `env`) routes that session's hooks but not
+  the daemon: set it on the daemon (its unit or starting shell) so both agree. Per-profile data
+  separation through one shared daemon is not supported.
