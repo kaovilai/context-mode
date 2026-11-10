@@ -171,8 +171,14 @@ var PLAIN_OUTPUT_ENV = Object.freeze({ NO_COLOR: "1", FORCE_COLOR: "0" });
 var HOST_SESSION_ENV = Object.freeze({ "claude-code": "CLAUDE_CODE_SESSION_ID" });
 var DAEMON_HOST = "127.0.0.1";
 var DAEMON_DEFAULT_PORT = 8790;
+var DAEMON_PORT_ENV = "CONTEXT_MODE_DAEMON_PORT";
 var DAEMON_PATH = "/mcp";
+var DAEMON_HEALTH_PATH = "/healthz";
 var DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_DEFAULT_PORT}${DAEMON_PATH}`;
+function daemonUrlOf(port) {
+  return `http://${DAEMON_HOST}:${port}${DAEMON_PATH}`;
+}
+var DAEMON_PROBE_TIMEOUT_MS = 1500;
 var NODE_MIN = "24.15.0";
 var DATA_ROOT = "~/.context-mode";
 var DATA_DIR_ENV = "CONTEXT_MODE_DATA_DIR";
@@ -301,6 +307,9 @@ var DOCTOR_LABEL = Object.freeze({
   D10: "enforcement mode",
   D11: "shell"
 });
+var DAEMON_CHECK_FIX = "context-mode daemon --install";
+var DAEMON_CHECK_PASS_DETAIL = "shared daemon reachable";
+var DAEMON_CHECK_DOWN_DETAIL = "no daemon answers on the configured port";
 var REPORT_SOURCE_LABEL = "ctx_doctor:report";
 var REPORT_POINTER = `ctx_search({queries:["FAIL","PASS","UNKNOWN"], source:${JSON.stringify(REPORT_SOURCE_LABEL)}})`;
 var GIT_LS_REMOTE_TAG_ARGS = Object.freeze(["--tags", "--refs"]);
@@ -9111,6 +9120,16 @@ import { closeSync as closeSync3, existsSync as existsSync17, mkdirSync as mkdir
 import { tmpdir as tmpdir2 } from "node:os";
 import path12 from "node:path";
 
+// src/core/ops/daemon-state.ts
+function daemonConfiguredPort(env) {
+  const raw = env[DAEMON_PORT_ENV];
+  if (raw !== void 0 && /^[0-9]+$/.test(raw)) {
+    const port = Number(raw);
+    if (port >= 1 && port <= 65535) return port;
+  }
+  return DAEMON_DEFAULT_PORT;
+}
+
 // src/setup/hook-sample.ts
 var SAMPLE_FILE = "big.log";
 var SAMPLE_COMMAND = "cat " + SAMPLE_FILE;
@@ -9684,6 +9703,17 @@ function mcpCheck(cmd, env) {
     } }) + "\n");
   });
 }
+async function daemonCheck(env) {
+  const port = daemonConfiguredPort(env);
+  const url = `http://${DAEMON_HOST}:${port}${DAEMON_HEALTH_PATH}`;
+  try {
+    const r2 = await fetch(url, { signal: AbortSignal.timeout(DAEMON_PROBE_TIMEOUT_MS), redirect: "manual" });
+    if (r2.status === 204) return { name: "daemon", ok: true, detail: `${DAEMON_CHECK_PASS_DETAIL} at ${daemonUrlOf(port)}` };
+    return { name: "daemon", ok: true, warn: true, detail: `${daemonUrlOf(port)} answered HTTP ${r2.status}, not the daemon's 204. Fix: ${DAEMON_CHECK_FIX}` };
+  } catch {
+    return { name: "daemon", ok: true, warn: true, detail: `${DAEMON_CHECK_DOWN_DETAIL}. Fix: ${DAEMON_CHECK_FIX}` };
+  }
+}
 function hookRound(row, env) {
   const cmd = row.hookRunCommand;
   const input = JSON.stringify(row.goldenPayload);
@@ -10065,6 +10095,7 @@ async function verifyRow(row, ctx) {
   const cp = copyCheck(row, ctx.pkgDir);
   if (cp) checks.push(cp);
   checks.push(await mcpCheck(row.serverCommand, env));
+  if (row.installMode === "marketplace") checks.push(await daemonCheck(env));
   if (row.hookCommand) checks.push(hookCheck(row, env));
   checks.push(hookRegisteredCheck(row, env, l));
   const en = hookEnabledCheck(row, ls.status);
