@@ -64,6 +64,12 @@ jobs:
       # (DEVIATIONS D-CI-PERF-1, D-CI-PERF-5). It also prints the cold first call of a fresh bundle copy as info.
       - run: node e2e/checks/setup-hook-overhead.mjs
         name: D3 hook overhead p95 <= 15 ms (perf check; cold first call is info)
+        # FORK ONLY: windows + node 24.15.0 measures the gate at exactly the 15 ms budget even on green
+        # runs (700c74e7: 15/15; 2ab139cd: 16 fail then green on rerun), while node 26 measures 9-11 ms.
+        # Same CI-only knob src/setup/engine.ts reads (overheadBudgetMs), set only for that combo:
+        # 20 ms keeps one-tick runner noise from failing main while a real regression still fails every batch.
+        env:
+          CM_HOOK_OVERHEAD_BUDGET_MS: ${{ (runner.os == 'Windows' && matrix.node == '24.15.0') && '20' || '' }}
       # Viet round (Windows Claude Desktop): ctx_doctor D5 FAIL 72 ms and 58 ms against 40 ms. Info only: splits the claude-code hook wall
       # into bare node, empty module, hook bundle, idle and under load, sync and async spawn, so the Windows cost is read from numbers.
       - run: node e2e/checks/hook-phase-profile.mjs
