@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { ADAPTERS, hasReplace } from "../src/adapters/table.ts";
 import type { AgentId } from "../src/core/contracts/agents.ts";
-import { KIRO_TOOL_MATCHERS, NODE_MIN, RELEASE_SUMS_FILE, SERVER_KEY } from "../src/core/contracts/constants.ts";
+import { DAEMON_URL, KIRO_TOOL_MATCHERS, NODE_MIN, RELEASE_SUMS_FILE, SERVER_KEY } from "../src/core/contracts/constants.ts";
 import type { AdapterRow } from "../src/core/contracts/types.ts";
 
 // Build-tool literals (same rule as build.mjs DEFAULT_OUT/BUNDLES; DEVIATIONS D-M3-A7-5).
@@ -156,12 +156,27 @@ function mcpManifest(row: AdapterRow, version: string): JsonObject {
   };
 }
 
+// ADR-0026 (fork, 2026-11-10): the Claude Code plugin connects straight to the shared daemon over loopback
+// HTTP instead of spawning a per-session stdio bridge (server.mjs). The daemon IS the MCP server (decision 1);
+// a user-scope `claude mcp add --transport http` entry at the same URL is the proven path, and A26-r14 steers
+// Claude Code onto the sessionful leg so workspace and session resolve per session. server.mjs still ships in
+// the plugin tree: it stays the stdio default for every other surface. The daemon must be running
+// (`context-mode daemon --install`, doctor D12) for the plugin's MCP entry to connect.
+function claudeMcpManifest(row: AdapterRow, version: string): JsonObject {
+  return {
+    name: SERVER_KEY,
+    version,
+    description: devMeta().description,
+    mcpServers: { [SERVER_KEY]: { type: "http", url: DAEMON_URL } },
+  };
+}
+
 // impl/13 §3.1 step 2 table, keyed by installMode. Returns [relative path, content] or null (no manifest file).
 function manifestFor(row: AdapterRow, version: string): [string, JsonObject] | null {
   switch (row.installMode) {
     case "marketplace":
       // D-R33-CC-SKILLS-1: no skills key. Claude Code always loads <plugin>/skills; a skills key adds a second dir.
-      return [".claude-plugin/plugin.json", { ...mcpManifest(row, version), author: author(), hooks: "./" + hookFile(row) }]; // D-M3-A7-3
+      return [".claude-plugin/plugin.json", { ...claudeMcpManifest(row, version), author: author(), hooks: "./" + hookFile(row) }]; // D-M3-A7-3
     case "extension": // qwen reads config.hooks, a path relative to the extension (D-FU-RM-QWEN-1)
       return [row.id + "-extension.json", row.id === "qwen" ? { ...mcpManifest(row, version), hooks: hookFile(row) } : mcpManifest(row, version)];
     case "plugin":
