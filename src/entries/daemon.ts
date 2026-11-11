@@ -461,7 +461,12 @@ export async function startDaemon(argv: string[], env: NodeJS.ProcessEnv, onStop
       return;
     }
     if (req.method === "GET" && req.url === DAEMON_HEALTH_PATH) {
-      res.writeHead(204).end();
+      // kaovilai/context-mode#11: degraded mode registers ctx_doctor only (server-core.ts §5 step 3),
+      // so a plain 204 here would tell the hook gate "tools up" while every other ctx_* tool is
+      // missing — the dead-end state this gate exists to prevent. 503 reads as tools-down and the
+      // hooks fail open. A healthy daemon keeps the 204 the doctor and setup expect.
+      if (core.degraded) res.writeHead(503, { "content-type": "text/plain" }).end("degraded: only ctx_doctor is registered\n");
+      else res.writeHead(204).end();
       return;
     }
     if (req.url !== DAEMON_PATH) {

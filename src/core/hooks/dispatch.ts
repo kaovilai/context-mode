@@ -18,6 +18,8 @@ import type {
 } from "../contracts/types.ts";
 import { getAdapter, hasRecall, hasReplace } from "../../adapters/table.ts";
 import { decide } from "../policy/decide.ts";
+import { isReadDeny } from "../policy/read-deny.ts";
+import { daemonToolsDown, hookBypassed } from "./daemon-gate.ts";
 import { isOwnFile } from "../policy/own-file.ts";
 import { isSubagentCall, pickSubagentCase, toolSetForAgentType, type ToolSetSources } from "../policy/subagent.ts";
 import { readUserDeny } from "../policy/user-deny.ts";
@@ -337,7 +339,22 @@ function toolSetSources(ev: CanonicalHookEvent, project: ProjectContext, env: No
 
 async function preToolUse(ev: CanonicalHookEvent, row: AdapterRow, project: ProjectContext, env: NodeJS.ProcessEnv): Promise<Decision> {
   const userDeny = readUserDeny(project.worktree, ev.agent);
-  const decision0 = decide(ev, row, userDeny, project);
+  let decision0 = decide(ev, row, userDeny, project);
+  // kaovilai/context-mode#11: a deny that routes the model at ctx_* tools is a dead end when the
+  // daemon is down. A read-deny has a serverless route (ranged Read / bounded sed), so a down
+  // daemon re-decides it onto that; the webfetch and size-guess denies have none, so they fail
+  // open instead. The user's bypass stands every interception down. User policy, parse-error and
+  // policy-unreadable denies never pass here (isUserPolicyDeny): they protect the user's own rules.
+  if (decision0.kind === "deny" && !isUserPolicyDeny(decision0.reason, row)) {
+    if (isReadDeny(decision0.reason)) {
+      // Outside-containment denies already carry the serverless template (D-R48-DENY-ROUTE-1):
+      // only a deny that actually routes at ctx_execute needs the probe and the re-decide.
+      if (hookBypassed(env)) decision0 = ALLOW;
+      else if (decision0.reason.includes(row.toolNamePrefix + "ctx_execute(") && await daemonToolsDown(env, ev.agent)) decision0 = decide(ev, row, userDeny, project, true);
+    } else if (decision0.reason.includes(row.toolNamePrefix + "ctx_") && (hookBypassed(env) || (await daemonToolsDown(env, ev.agent)))) {
+      decision0 = ALLOW;
+    }
+  }
   let decision = decision0;
   if (decision0.kind === "deny" && isSubagentCall(ev) && !isUserPolicyDeny(decision0.reason, row)) {
     // Case A keeps decision0 (D-M3-H2-4); case B names the run.mjs wrapper for a shell call.
@@ -484,13 +501,15 @@ async function postReplace(ev: CanonicalHookEvent, row: AdapterRow, project: Pro
   // query), the common web-search servers an objective and a query list. Those keys are read too, so an
   // MCP call never indexes under an empty query and the handle line's first query is the call's own words
   // (before: every MCP replace printed queries:["",...] and ranked on the prompt alone).
+  // #11: a tool whose input carries none of the keys (e.g. t3_thread_read with only a threadId) falls
+  // back to the canonical tool name, so the first query is never the empty string.
   // D-NO-LOSSY-CUT-2: the intent is echoed in the handle line, so a key over ECHO_MAX_BYTES (a multi-KB
   // MCP prompt is routine) is cut to that many bytes, whole code points — the replace must never return a
   // pointer the size of the output it replaced. The head keeps the query useful; ranking reads the same cut.
   const intent = headBytes([tool.input.description, tool.input.command, tool.input.file_path, tool.input.pattern, tool.input.url,
     tool.input.intent, tool.input.objective, tool.input.query, tool.input.path, tool.input.prompt,
     listStr(tool.input.search_queries) || listStr(tool.input.queries)]
-    .map(str).find((v) => v.trim() !== "") ?? "", ECHO_MAX_BYTES);
+    .map(str).find((v) => v.trim() !== "") ?? tool.canonicalName, ECHO_MAX_BYTES);
   // One chunk pass for both forms (D-M7-FT-2): the stored chunks and the selected chunks are the same
   // array, so the in-memory selection equals selectChunks over the stored source without reading it back.
   const chunks = chunkText(text, "text", REPLACE_CHUNK_BYTES); // D-M7-SV-1: small chunks, line-aligned cuts
@@ -507,6 +526,15 @@ async function postReplace(ev: CanonicalHookEvent, row: AdapterRow, project: Pro
     indexDetached(project, ev.sessionId, sourceId, label, text, chunks);
   }
   const handle = sourceHandle(sourceId);
+  // kaovilai/context-mode#11: a replace hands the model a ctx_search handle; when the daemon is down
+  // that handle is unreachable and the output is gone with no way back. Fail open — the whole output
+  // goes through — with the indexing above still run, so ctx_search, recall and ctx_resume find the
+  // output after the daemon recovers (the journal row lands either way). The bypass is the user's
+  // own ask for raw output, indexed the same. Probed only here, past the size gate and every early
+  // ALLOW (a case-A subagent never pays for it), so a small output never probes either; loopback
+  // answers in well under a millisecond.
+  const failOpen = hookBypassed(env) || (await daemonToolsDown(env, ev.agent));
+  if (failOpen) return ALLOW;
   // D-M7-SV-5: rank by the intent and the session's last user prompt (any word), so a bare cat still
   // returns the line the user asked for. The more line keeps the intent. No prompt -> intent alone.
   const prompt = await lastPrompt(project, ev.sessionId);

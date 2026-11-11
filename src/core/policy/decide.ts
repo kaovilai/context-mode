@@ -55,8 +55,11 @@ const has = (list: readonly string[], v: string): boolean => list.includes(v);
  *  `worktree` (on a ProjectContext it is a lazy getter that spawns git), so a PreToolUse call spawns nothing. */
 export type DenyRoot = string | Pick<ProjectContext, "worktree" | "containmentRoot">;
 
-/** `root`: the project of this call (D-R48-DENY-ROUTE-1); defaults to ev.cwd. */
-export function decide(ev: CanonicalHookEvent, row: AdapterRow, userDeny: string[] | null, root: DenyRoot = ev.cwd): Decision {
+/** `root`: the project of this call (D-R48-DENY-ROUTE-1); defaults to ev.cwd.
+ *  `toolsDown` (kaovilai/context-mode#11): the ctx_* routes are unreachable — a big-file deny takes
+ *  the serverless route (ranged Read / bounded sed) instead of naming ctx_execute. User policy denies
+ *  are never affected. */
+export function decide(ev: CanonicalHookEvent, row: AdapterRow, userDeny: string[] | null, root: DenyRoot = ev.cwd, toolsDown = false): Decision {
   const tool = ev.tool;
   if (tool === undefined) return ALLOW; // a PreToolUse with no tool is a dispatch bug (§6.1 input)
   const canonical = tool.canonicalName;
@@ -73,8 +76,8 @@ export function decide(ev: CanonicalHookEvent, row: AdapterRow, userDeny: string
   if (hit !== null) return deny(USER_DENY_REASON_PREFIX + hit);
 
   if (canonical === WEBFETCH) return webFetch(input, row); // step 4
-  if (canonical === BASH) return bash(ev, row, input, rules, root); // steps 5, 6a
-  if (canonical === READ) return read(ev, row, input, root); // step 6
+  if (canonical === BASH) return bash(ev, row, input, rules, root, toolsDown); // steps 5, 6a
+  if (canonical === READ) return read(ev, row, input, root, toolsDown); // step 6
   // Steps 5d, 7, 8 (Bash/PowerShell/Read/Grep/other-MCP hints) are retired: D-M7-RR-2, DECISIONS-r10 (2).
   return ALLOW; // step 9
 }
@@ -215,10 +218,10 @@ function webFetch(input: Record<string, unknown>, row: AdapterRow): Decision {
 
 // ---------- step 5: Bash ----------
 
-function bash(ev: CanonicalHookEvent, row: AdapterRow, input: Record<string, unknown>, rules: string[], root: DenyRoot): Decision {
+function bash(ev: CanonicalHookEvent, row: AdapterRow, input: Record<string, unknown>, rules: string[], root: DenyRoot, toolsDown: boolean): Decision {
   const cmd = str(input.command) ?? "";
   const parsed = parseShell(cmd);
-  if (!parsed.ok) return couldMatch(cmd, rules) ? deny(prefixToolNames(PARSE_ERROR_DENY_LINE, row.toolNamePrefix)) : psShellDump(ev, cmd, row, root) ?? ALLOW; // 5b, Q4
+  if (!parsed.ok) return couldMatch(cmd, rules) ? deny(prefixToolNames(PARSE_ERROR_DENY_LINE, row.toolNamePrefix)) : psShellDump(ev, cmd, row, root, toolsDown) ?? ALLOW; // 5b, Q4
   const cmds = unwrap(parsed.commands);
   for (const c of cmds) {
     const h = segmentHit(c, rules);
@@ -232,7 +235,7 @@ function bash(ev: CanonicalHookEvent, row: AdapterRow, input: Record<string, unk
       if (kind !== null) return deny(denyMessage(kind, cmd, row, str(input.description)));
     }
   }
-  return shellDump(ev, cmds, row, root) ?? psShellDump(ev, cmd, row, root) ?? ALLOW; // 6a: file size known by stat, kept (D-M7-RR-1)
+  return shellDump(ev, cmds, row, root, toolsDown) ?? psShellDump(ev, cmd, row, root, toolsDown) ?? ALLOW; // 6a: file size known by stat, kept (D-M7-RR-1)
 }
 
 /** 5c, in the §6.1 order: curl/wget, inline HTTP, build tool. */
@@ -288,11 +291,19 @@ function fileSize(abs: string): number {
 }
 
 /** D-R48-OWN-FILE-1 (#1326): the agent's own skill and rule files pass whole. D-R48-DENY-ROUTE-1 (#1326): the deny names
+<<<<<<< HEAD
  *  ctx_execute(file=) only for a path ctx_execute can open (inside `root`); any other path gets the ranged-read route. */
 function bigDeny(ev: CanonicalHookEvent, row: AdapterRow, cwd: string, p: string, size: number, root: DenyRoot): Decision | null {
   const abs = resolve(cwd, p);
   if (size <= OUTPUT_CAP || isOwnFile(ev.agent, cwd, p)) return null;
   return deny(executeCanOpen(root, abs) ? READ_DENY_MESSAGE(abs, size, row.toolNamePrefix) : READ_DENY_RANGE_MESSAGE(abs, size));
+=======
+ *  ctx_execute(file=) only for a path ctx_execute can open (inside `root`); any other path gets the ranged-read route.
+ *  #11: `toolsDown` — the ctx_* routes are unreachable, so every path gets the ranged-read route. */
+function bigDeny(ev: CanonicalHookEvent, row: AdapterRow, abs: string, size: number, root: DenyRoot, toolsDown: boolean): Decision | null {
+  if (size <= OUTPUT_CAP || isOwnFile(ev.agent, abs)) return null;
+  return deny(toolsDown || !executeCanOpen(root, abs) ? READ_DENY_RANGE_MESSAGE(abs, size) : READ_DENY_MESSAGE(abs, size, row.toolNamePrefix));
+>>>>>>> 231e0b37 (fix(hooks): fail open when the daemon the routes point at is down)
 }
 
 /** True when ctx_execute(file=abs) passes its containment check. A failed git lookup counts as outside: the ranged
@@ -307,14 +318,18 @@ function executeCanOpen(root: DenyRoot, abs: string): boolean {
   }
 }
 
-function read(ev: CanonicalHookEvent, row: AdapterRow, input: Record<string, unknown>, root: DenyRoot): Decision {
+function read(ev: CanonicalHookEvent, row: AdapterRow, input: Record<string, unknown>, root: DenyRoot, toolsDown: boolean): Decision {
   if (!present(input.offset) && !present(input.limit)) {
     for (const p of readPaths(input)) {
       const abs = resolve(ev.cwd, p);
       const size = fileSize(abs);
       // D-R47-READ-MEDIA-1 (#1321, #1324): an image or PDF the host shows as a block costs no text bytes.
       if (size > OUTPUT_CAP && !isMediaRead(ev.agent, abs)) {
+<<<<<<< HEAD
         const d = bigDeny(ev, row, ev.cwd, p, size, root);
+=======
+        const d = bigDeny(ev, row, abs, size, root, toolsDown);
+>>>>>>> 231e0b37 (fix(hooks): fail open when the daemon the routes point at is down)
         if (d !== null) return d;
       }
     }
@@ -324,7 +339,7 @@ function read(ev: CanonicalHookEvent, row: AdapterRow, input: Record<string, unk
 
 /** 6a: null = not a dump, ALLOW = bounded dump, deny = unbounded dump over the cap. Skipped only on a row with a
  *  Read tool where the dump runs and PostToolUse replaces it (D-HA-QWEN-DUMP-1, D-HA-GEMINI-DUMP-1). */
-function shellDump(ev: CanonicalHookEvent, cmds: SimpleCommand[], row: AdapterRow, root: DenyRoot): Decision | null {
+function shellDump(ev: CanonicalHookEvent, cmds: SimpleCommand[], row: AdapterRow, root: DenyRoot, toolsDown: boolean): Decision | null {
   if (row.nativeTools.read !== undefined && row.nativeTools.read.length > 0 && dumpRunsThenReplaces(row)) return null;
   // D-CDX-CAT-1: every command whose stdout reaches the tool result is checked, also inside a chain (`cd x && cat f`).
   let dir = ev.cwd;
@@ -338,7 +353,11 @@ function shellDump(ev: CanonicalHookEvent, cmds: SimpleCommand[], row: AdapterRo
     if (d === null) continue;
     if (d.bounded) { verdict = ALLOW; continue; }
     const abs = resolve(dir, d.file);
+<<<<<<< HEAD
     const big = bigDeny(ev, row, dir, d.file, fileSize(abs), root);
+=======
+    const big = bigDeny(ev, row, abs, fileSize(abs), root, toolsDown);
+>>>>>>> 231e0b37 (fix(hooks): fail open when the daemon the routes point at is down)
     if (big !== null) return big;
   }
   return verdict;
@@ -346,10 +365,14 @@ function shellDump(ev: CanonicalHookEvent, cmds: SimpleCommand[], row: AdapterRo
 
 /** D-PWSH-DUMP-1: 6a for PowerShell (Codex on Windows, Copilot CLI powershell, VS Code). Its own word reader keeps
  *  `C:\\logs\\app.log` whole. Same skip rule, same deny text as shellDump. null = no unbounded dump of a large file. */
-function psShellDump(ev: CanonicalHookEvent, cmd: string, row: AdapterRow, root: DenyRoot): Decision | null {
+function psShellDump(ev: CanonicalHookEvent, cmd: string, row: AdapterRow, root: DenyRoot, toolsDown: boolean): Decision | null {
   if (row.nativeTools.read !== undefined && row.nativeTools.read.length > 0 && dumpRunsThenReplaces(row)) return null;
   for (const abs of psDumpFiles(cmd, ev.cwd)) {
+<<<<<<< HEAD
     const d = bigDeny(ev, row, ev.cwd, abs, fileSize(abs), root);
+=======
+    const d = bigDeny(ev, row, abs, fileSize(abs), root, toolsDown);
+>>>>>>> 231e0b37 (fix(hooks): fail open when the daemon the routes point at is down)
     if (d !== null) return d;
   }
   return null;

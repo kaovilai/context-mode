@@ -38,6 +38,10 @@ export function readReplaceTrigger(raw: string | undefined): number {
   return Number.isSafeInteger(n) && n > 0 ? n : REPLACE_TRIGGER_BYTES_DEFAULT;
 }
 export const REPLACE_TRIGGER_BYTES = readReplaceTrigger(process.env[REPLACE_TRIGGER_ENV]);
+// kaovilai/context-mode#11: "1" = the user asked for raw output — the PostToolUse replace and the
+// Read/shell-dump deny stand down for the session (whole output, unbounded reads allowed again).
+// Set in the environment Claude Code starts from; a hook inherits the host process env.
+export const BYPASS_ENV = "CTX_MODE_BYPASS";
 // D-R41-READ-OFFSET-1 (#1314): a read-like tool (canonical name) called with a range key is the user's own window:
 // PostToolUse lets it through whole. Claude Code, Pi, Gemini: offset/limit; VS Code read_file and Copilot view map to them.
 export const RANGE_READ_TOOLS = Object.freeze(["Read", "view"]);
@@ -255,6 +259,10 @@ export const MAX_NEST_DEPTH = 32; // impl/08 §2.3 step 2a, ADR-0008 "Parse erro
 // impl/08 §6.1 step 6: Read (or one-file shell dump) over OUTPUT_CAP with no offset/limit. The text is the
 // src/prompt/hooks/read-deny.md template (D-DU-DENY-1, src/core/policy/read-deny.ts); this caps its fixed bytes.
 export const READ_DENY_FIXED_CAP = 120;
+// kaovilai/context-mode#11: the head window isReadDeny scans for the deny's fixed first sentence
+// ("<digits>-byte file, over the one-read limit."). A size is at most 10 digits and the sentence
+// is 34 more characters, so 64 covers it with room; the number itself never reaches the model.
+export const READ_DENY_HEAD_MAX = 64;
 // D-R48-OWN-FILE-1 (#1326): the shared skill dir of the Agent Skills layout (~/.agents/skills), read by several agents.
 export const SHARED_SKILLS_DIR = Object.freeze([".agents", "skills"] as const);
 
