@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { claudeDirOf, claudeUserConfigOf, codexDirOf, copilotDirOf, dataRootOf, geminiDirOf, kiroDirOf, opencodeDirOf } from "../core/project/config-dir.ts";
-import { AGENT_HOME_DIR, CLAUDE_ENTRY_CHECK_DETAIL, D2_NODE_DETAIL, D2_NODE_FIX, D2_SQLITE_DETAIL, D2_SQLITE_FIX, DB_FILE_NAME, DAEMON_CHECK_DOWN_DETAIL, DAEMON_CHECK_FIX, DAEMON_CHECK_PASS_DETAIL, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PROBE_TIMEOUT_MS, MCP_ENV_FIELD, MCP_ENV_VARS_FIELD, MCP_SERVERS_KEY, MCP_TOOLS_FIELD, SETUP_MANIFEST_FILE, NATIVE_INSTALL, OPENCODE_CONFIG_FILES, OPENCODE_PLUGIN_KEY, OPENCODE_PLUGINS_KEY, OPENCODE_PLUGIN_PATH, PROJECTS_DIR_NAME, SERVER_KEY, TOOL_ORDER, UPGRADE_REPORT_ONLY_REASONS, daemonUrlOf } from "../core/contracts/constants.ts";
+import { AGENT_HOME_DIR, CLAUDE_ENTRY_CHECK_DETAIL, D2_NODE_DETAIL, D2_NODE_FIX, D2_SQLITE_DETAIL, D2_SQLITE_FIX, DB_FILE_NAME, DAEMON_CHECK_DOWN_DETAIL, DAEMON_CHECK_FIX, DAEMON_CHECK_PASS_DETAIL, DAEMON_HEALTH_PATH, DAEMON_HOST, DAEMON_PORT_ENV, DAEMON_PROBE_TIMEOUT_MS, MCP_ENV_FIELD, MCP_ENV_VARS_FIELD, MCP_SERVERS_KEY, MCP_TOOLS_FIELD, SETUP_MANIFEST_FILE, NATIVE_INSTALL, OPENCODE_CONFIG_FILES, OPENCODE_PLUGIN_KEY, OPENCODE_PLUGINS_KEY, OPENCODE_PLUGIN_PATH, PROJECTS_DIR_NAME, SERVER_KEY, TOOL_ORDER, UPGRADE_REPORT_ONLY_REASONS, daemonUrlOf } from "../core/contracts/constants.ts";
 import { daemonConfiguredPort } from "../core/ops/daemon-state.ts";
 import { CtxError, formatError } from "../core/contracts/errors.ts";
 import { nodeTooOld } from "../core/hooks/fallback.ts";
@@ -773,9 +773,15 @@ function hookRegisteredCheck(row: CheckRow, env: SetupContext["env"], list: Chec
  * ADR-0020 hook-runs, OPEN-ITEMS H5 (D-HF-DOCTOR-RUNS-1): one large shell read, in the host's own wire shape, through
  * the hook bundle for this agent (in-process agents too). PASS only on the host's saving effect with the project
  * resolved. The sample runs in its own temp HOME and project, so doctor never writes into the user's store.
+ * kaovilai/context-mode#11: the claude-code hook gates its replace on the daemon's /healthz, so the sample must see
+ * a reachable daemon-side or the gate correctly fails open and this check would read "no saving decision" on every
+ * machine that does not run the daemon (CI, a fresh install before `context-mode daemon`). A detached stub child
+ * answers 204 on an ephemeral port — detached because the sample runs under spawnSync, which freezes this process'
+ * event loop and would starve an in-process server. The real daemon's state stays the D12 row's to report.
  */
-export function hookRunsCheck(row: CheckRow, env: SetupContext["env"]): Check {
+export async function hookRunsCheck(row: CheckRow, env: SetupContext["env"]): Promise<Check> {
   const root = mkdtempSync(path.join(tmpdir(), "cm-doctor-runs-"));
+  let stub: ReturnType<typeof spawn> | null = null;
   try {
     const home = path.join(root, "home");
     const proj = path.join(root, "proj");
@@ -786,11 +792,38 @@ export function hookRunsCheck(row: CheckRow, env: SetupContext["env"]): Check {
     const { effect, payload } = hookSample(row.id, proj, text);
     const sampleEnv: NodeJS.ProcessEnv = { ...env, HOME: home, USERPROFILE: home };
     delete sampleEnv.CLAUDE_PROJECT_DIR; // the sample project is the payload cwd, never the caller's project
+    if (row.id === "claude-code") {
+      // CodeRabbit review (#15): a stub that cannot start must be a failed check, never a throw —
+      // a throw loses the doctor report and rolls setup back with nothing reported. A parent-owned
+      // stdin pipe ends the child if only the parent is signalled and the finally never runs.
+      const child = spawn(process.execPath, ["-e", 'const{createServer}=require("node:http");const s=createServer((q,r)=>{if(q.url==="/healthz")r.writeHead(204).end();else r.writeHead(404).end();});s.listen(0,"127.0.0.1",()=>process.stdout.write(String(s.address().port)+"\\n"));process.stdin.resume();process.stdin.on("end",()=>process.exit(0));'], { stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
+      stub = child;
+      let stubFailed: string | undefined;
+      try {
+        const port = await new Promise<number>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("daemon stub did not print its port")), VERIFY_TIMEOUT_MS);
+          // The error listener goes on before stdout is touched: on descriptor exhaustion spawn
+          // can queue an error and hand back a child whose stdout is missing — reading stdout
+          // first would throw before any listener exists (Copilot review #15).
+          let out = "";
+          const fail = (err: Error): void => { clearTimeout(timer); reject(err); };
+          child.on("error", fail);
+          if (child.stdout === null) { fail(new Error("spawn gave no stdout (descriptor exhaustion?)")); return; }
+          child.stdout.setEncoding("utf8");
+          child.stdout.on("data", (d: string) => { out += d; const nl = out.indexOf("\n"); if (nl >= 0) { clearTimeout(timer); resolve(Number(out.slice(0, nl).trim())); } });
+        });
+        sampleEnv[DAEMON_PORT_ENV] = String(port);
+      } catch (err) {
+        stubFailed = "daemon stub: " + (err instanceof Error ? err.message : String(err));
+      }
+      if (stubFailed !== undefined) return { name: "hook-runs", ok: false, detail: stubFailed };
+    }
     const cmd = row.hookRunCommand;
     const r = spawnSync(cmd[0], cmd.slice(1), { env: sampleEnv, cwd: proj, input: JSON.stringify(payload), encoding: "utf8", timeout: VERIFY_TIMEOUT_MS, windowsHide: true });
     const bad = sampleVerdict(row.id, effect, text, { status: r.status, stdout: `${r.stdout ?? ""}`, stderr: `${r.stderr ?? ""}` });
     return bad === null ? { name: "hook-runs", ok: true } : { name: "hook-runs", ok: false, detail: bad };
   } finally {
+    stub?.kill();
     rmSync(root, { recursive: true, force: true });
   }
 }
@@ -1073,7 +1106,7 @@ async function verifyRow(row: CheckRow, ctx: SetupContext): Promise<Check[]> {
   const en = hookEnabledCheck(row, ls.status);
   if (en) checks.push(en);
   if (row.copilotSettings) checks.push(await copilotEnabledCheck(row, ctx));
-  checks.push(hookRunsCheck(row, env), hookSeenCheck(row, dataRootOf(env, ctx.home)), skillsCheck(row, ctx.pkgDir));
+  checks.push(await hookRunsCheck(row, env), hookSeenCheck(row, dataRootOf(env, ctx.home)), skillsCheck(row, ctx.pkgDir));
   // D-NI-PI-GATE-1: a packages[] extensions filter keeps pi from loading the listed package's hooks.
   if (row.id === "pi") return withHookGate(checks, piSettingsGate(env, ctx.home, ctx.pkgDir, process.cwd()));
   // D-NI-VSCODE-GATE-1: chat.useHooks false, a hookFilesLocations that drops ~/.copilot/hooks, or a managed policy keeps VS Code from running the hook file.

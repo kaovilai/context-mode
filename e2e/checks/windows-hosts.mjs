@@ -13,6 +13,7 @@
 // Every failure is printed as a MATRIX line and the process exits 1 at the end. Nothing is skipped on Windows; a host
 // whose CLI npm cannot install still runs all four steps from the written config (cli-install says why).
 import { spawn, spawnSync } from "node:child_process";
+import assert from "node:assert/strict";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -222,7 +223,19 @@ function registeredServer(id, home, project, notes, env = process.env) {
   const vars = { "${CLAUDE_PLUGIN_ROOT}": rootDir, "${extensionPath}": rootDir, "${/}": path.sep, "${workspaceFolder}": project };
   const fix = (s) => ({ command: expand(s.command, vars), args: s.args.map((a) => expand(a, vars)) });
   switch (id) {
-    case "claude-code": return fix(readJson(path.join(rootDir, ".claude-plugin", "plugin.json")).mcpServers["context-mode"]);
+    case "claude-code": {
+      // ADR-0026 (PR #10): the plugin's MCP entry is the daemon URL (type http), not a spawnable
+      // command. The leg still reads the installed entry and asserts the daemon URL and the
+      // session header (CodeRabbit review #15), then verifies the packaged server.mjs still
+      // handshakes, like the pi leg; the daemon itself is doctor D12's and the setup
+      // daemon-check's to exercise.
+      const entry = readJson(path.join(rootDir, ".claude-plugin", "plugin.json")).mcpServers["context-mode"];
+      assert.equal(entry.type, "http", "claude-code MCP entry must be the daemon URL (ADR-0026)");
+      assert.equal(entry.url, "http://127.0.0.1:${CONTEXT_MODE_DAEMON_PORT:-8790}/mcp", "the daemon URL, port following the env var: " + entry.url);
+      assert.ok(entry.headers && entry.headers["x-context-mode-session"], "the per-session header (ADR-0026 decision 3)");
+      notes.push("claude-code's MCP entry is the shared daemon URL (ADR-0026); verified URL + session header, ran the packaged server.mjs");
+      return { command: process.execPath, args: [path.join(pkgDir, "server.mjs"), "--agent", "claude-code"] };
+    }
     case "gemini": return fix(readJson(path.join(rootDir, "gemini-extension.json")).mcpServers["context-mode"]);
     case "qwen": return fix(readJson(path.join(rootDir, "qwen-extension.json")).mcpServers["context-mode"]);
     case "codex": return fix(tomlServer(path.join(env.CODEX_HOME || path.join(home, ".codex"), "config.toml")));
@@ -435,6 +448,35 @@ async function main() {
     delete env.FAKE;
     if (WIN) { env.APPDATA = path.join(home, "AppData", "Roaming"); env.LOCALAPPDATA = path.join(home, "AppData", "Local"); }
     delete env.CODEX_HOME;
+    // kaovilai/context-mode#11 (Copilot review #15): the claude-code hook gates its replace on the
+    // daemon's /healthz, so on a daemon-less runner the hook step would correctly fail open and
+    // read as a "want replace" FAIL. A detached stub child supplies the 204 — detached because
+    // runShellLine blocks in spawnSync, an in-process listener could never answer — and dies with
+    // this process (stdin pipe EOF) or the kill below.
+    let gateStub = null;
+    if (h.id === "claude-code") {
+      gateStub = spawn(process.execPath, ["-e", 'const{createServer}=require("node:http");const s=createServer((q,r)=>{if(q.url==="/healthz")r.writeHead(204).end();else r.writeHead(404).end();});s.listen(0,"127.0.0.1",()=>process.stdout.write(String(s.address().port)+"\\n"));process.stdin.resume();process.stdin.on("end",()=>process.exit(0));'], { stdio: ["pipe", "pipe", "inherit"] });
+      // Startup failure is this host's record, never a matrix abort: the outer main() catch
+      // would end the run before the remaining hosts are checked (Copilot review #15). The
+      // error listener goes on before stdout is touched — on descriptor exhaustion spawn can
+      // queue an error and hand back a child with no stdout at all.
+      const port = await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), 30_000);
+        const fail = () => { clearTimeout(timer); resolve(null); };
+        gateStub.on("error", fail);
+        if (gateStub.stdout === null) { fail(); return; }
+        let out = "";
+        gateStub.stdout.setEncoding("utf8");
+        gateStub.stdout.on("data", (d) => { out += d; const nl = out.indexOf("\n"); if (nl >= 0) { clearTimeout(timer); const p = Number(out.slice(0, nl).trim()); resolve(Number.isSafeInteger(p) && p > 0 ? p : null); } });
+      });
+      if (port === null) {
+        record(h.id, "hook", false, "gate stub: could not start a /healthz stub for the daemon gate; the hook step cannot run");
+        gateStub.kill();
+        gateStub = null;
+      } else {
+        env.CONTEXT_MODE_DAEMON_PORT = String(port);
+      }
+    }
     // Codex finds its home with the Rust dirs crate, which asks Windows for the profile folder and ignores HOME and
     // USERPROFILE (openai/codex codex-rs/utils/home-dir). Without CODEX_HOME it reads the runner's real ~/.codex, never
     // this test HOME, so `codex mcp list` cannot see what setup wrote. CODEX_HOME must exist (find_codex_home).
@@ -445,6 +487,7 @@ async function main() {
     stepHook(h.id, home, project, env);
     await stepMcp(h.id, home, project, env);
     if (h.id === "codex") stepCodexPlugin(home, env);
+    gateStub?.kill();
   }
 }
 

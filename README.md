@@ -595,12 +595,10 @@ Commands in the agent: `/ctx-stats` shows the `ctx_stats` result, `/ctx-doctor` 
 | Fetch of a URL, for `ctx_index` | Your agent asks for a page. The fetch blocks private and link-local addresses, checks each address the host name points to, connects to the address it checked, and checks again at each redirect. | [fetch.ts](src/core/sandbox/fetch.ts) |
 | One read of the npm dist-tags, with `git ls-remote` of the release tags as the fallback | You run `context-mode doctor`, to check for a new version | [doctor-env.ts](src/core/ops/doctor-env.ts) |
 | `npm i -g context-mode`, or `gh issue create` | You run `context-mode upgrade`, or you press a key to send the debug report | [commands.ts](src/cli/commands.ts) |
-| A loopback listen on 127.0.0.1, and its health probe | You opt into the [shared daemon](#many-sessions-one-process) | [daemon.ts](src/entries/daemon.ts) |
-| A loopback health probe of that daemon | The hook is about to replace a large tool result with a search pointer, or deny a big read: it checks the daemon it would point at answers, and lets the output through whole whenever the daemon stays silent | [daemon-gate.ts](src/core/hooks/daemon-gate.ts) |
+| A loopback listen on 127.0.0.1, and its health probes | You opt into the [shared daemon](#many-sessions-one-process), or run `context-mode setup`/`doctor`, which starts a throwaway listener to verify the Claude Code hook's saving effect; the hook itself checks the daemon it would point at answers before replacing a large tool result, and lets the output through whole whenever the daemon stays silent | [daemon-gate.ts](src/core/hooks/daemon-gate.ts), [engine.ts](src/setup/engine.ts) |
 | Your agent's own install command, npm or git | You install or update | Your agent |
 
-- The guard test D-PRIVACY-NET-1 in [tests/0008-enforcement.test.mjs](tests/0008-enforcement.test.mjs) scans the source for HTTP clients, sockets, DNS lookups, git network calls and gh or npm spawns. It flags each new call site, so this table stays true.
-- Doctor and the debug report remove secrets by their structure before they print.
+- The guard test D-PRIVACY-NET-1 in [tests/0008-enforcement.test.mjs](tests/0008-enforcement.test.mjs) scans the source for HTTP clients, sockets, DNS lookups, git network calls and gh or npm spawns. It flags each new call site, so this table stays true. Doctor and the debug report remove secrets by their structure before they print.
 
 Code from `ctx_execute` runs on your host as your user, with your files, your network and your environment except the preload variables, so keep your agent's own permission prompts on. Here "sandbox" means the output stays in the sandbox and out of the context.
 What the plugin stores, where, and how to delete it: [Privacy](https://contextmode.ai/docs/engine/privacy?utm_source=github&utm_medium=readme&utm_content=privacy).

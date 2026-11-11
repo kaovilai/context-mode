@@ -35,7 +35,13 @@ export function check() {
     // takes no outside PRs, its own PRs get the GLM reviewer) also runs on pull_request events.
     // pull_request_target is never allowed, not even on the exempted files: it runs in the base
     // branch's context with the repo secrets and the app token (CodeRabbit review, #14).
+    // The exemption is not just the filename: hosted-only-review.yml must keep the same-repo
+    // guard that justifies allowing its pull_request trigger, or the check fails (hosted-only
+    // review, #15).
     const forkPrAllowed = f === "agentic-workflow-locks.yml" || f === "hosted-only-review.yml";
+    if (forkPrAllowed && f === "hosted-only-review.yml") {
+      need(src.includes("head.repo.full_name == github.repository"), "workflows/hosted-only-review.yml must keep the same-repo guard on its pull_request trigger");
+    }
     need(forkPrAllowed ? !/^\s*pull_request_target\s*:/m.test(src) : !/^\s*pull_request(_target)?\s*:/m.test(src), `workflows/${f} must have no ${forkPrAllowed ? "pull_request_target" : "pull_request"} trigger`);
   }
 

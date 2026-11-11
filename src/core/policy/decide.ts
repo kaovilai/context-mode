@@ -291,19 +291,12 @@ function fileSize(abs: string): number {
 }
 
 /** D-R48-OWN-FILE-1 (#1326): the agent's own skill and rule files pass whole. D-R48-DENY-ROUTE-1 (#1326): the deny names
-<<<<<<< HEAD
- *  ctx_execute(file=) only for a path ctx_execute can open (inside `root`); any other path gets the ranged-read route. */
-function bigDeny(ev: CanonicalHookEvent, row: AdapterRow, cwd: string, p: string, size: number, root: DenyRoot): Decision | null {
-  const abs = resolve(cwd, p);
-  if (size <= OUTPUT_CAP || isOwnFile(ev.agent, cwd, p)) return null;
-  return deny(executeCanOpen(root, abs) ? READ_DENY_MESSAGE(abs, size, row.toolNamePrefix) : READ_DENY_RANGE_MESSAGE(abs, size));
-=======
  *  ctx_execute(file=) only for a path ctx_execute can open (inside `root`); any other path gets the ranged-read route.
  *  #11: `toolsDown` — the ctx_* routes are unreachable, so every path gets the ranged-read route. */
-function bigDeny(ev: CanonicalHookEvent, row: AdapterRow, abs: string, size: number, root: DenyRoot, toolsDown: boolean): Decision | null {
-  if (size <= OUTPUT_CAP || isOwnFile(ev.agent, abs)) return null;
+function bigDeny(ev: CanonicalHookEvent, row: AdapterRow, cwd: string, p: string, size: number, root: DenyRoot, toolsDown: boolean): Decision | null {
+  const abs = resolve(cwd, p);
+  if (size <= OUTPUT_CAP || isOwnFile(ev.agent, cwd, p)) return null;
   return deny(toolsDown || !executeCanOpen(root, abs) ? READ_DENY_RANGE_MESSAGE(abs, size) : READ_DENY_MESSAGE(abs, size, row.toolNamePrefix));
->>>>>>> 231e0b37 (fix(hooks): fail open when the daemon the routes point at is down)
 }
 
 /** True when ctx_execute(file=abs) passes its containment check. A failed git lookup counts as outside: the ranged
@@ -325,11 +318,7 @@ function read(ev: CanonicalHookEvent, row: AdapterRow, input: Record<string, unk
       const size = fileSize(abs);
       // D-R47-READ-MEDIA-1 (#1321, #1324): an image or PDF the host shows as a block costs no text bytes.
       if (size > OUTPUT_CAP && !isMediaRead(ev.agent, abs)) {
-<<<<<<< HEAD
-        const d = bigDeny(ev, row, ev.cwd, p, size, root);
-=======
-        const d = bigDeny(ev, row, abs, size, root, toolsDown);
->>>>>>> 231e0b37 (fix(hooks): fail open when the daemon the routes point at is down)
+        const d = bigDeny(ev, row, ev.cwd, p, size, root, toolsDown);
         if (d !== null) return d;
       }
     }
@@ -353,11 +342,7 @@ function shellDump(ev: CanonicalHookEvent, cmds: SimpleCommand[], row: AdapterRo
     if (d === null) continue;
     if (d.bounded) { verdict = ALLOW; continue; }
     const abs = resolve(dir, d.file);
-<<<<<<< HEAD
-    const big = bigDeny(ev, row, dir, d.file, fileSize(abs), root);
-=======
-    const big = bigDeny(ev, row, abs, fileSize(abs), root, toolsDown);
->>>>>>> 231e0b37 (fix(hooks): fail open when the daemon the routes point at is down)
+    const big = bigDeny(ev, row, dir, d.file, fileSize(abs), root, toolsDown);
     if (big !== null) return big;
   }
   return verdict;
@@ -368,11 +353,7 @@ function shellDump(ev: CanonicalHookEvent, cmds: SimpleCommand[], row: AdapterRo
 function psShellDump(ev: CanonicalHookEvent, cmd: string, row: AdapterRow, root: DenyRoot, toolsDown: boolean): Decision | null {
   if (row.nativeTools.read !== undefined && row.nativeTools.read.length > 0 && dumpRunsThenReplaces(row)) return null;
   for (const abs of psDumpFiles(cmd, ev.cwd)) {
-<<<<<<< HEAD
-    const d = bigDeny(ev, row, ev.cwd, abs, fileSize(abs), root);
-=======
-    const d = bigDeny(ev, row, abs, fileSize(abs), root, toolsDown);
->>>>>>> 231e0b37 (fix(hooks): fail open when the daemon the routes point at is down)
+    const d = bigDeny(ev, row, ev.cwd, abs, fileSize(abs), root, toolsDown);
     if (d !== null) return d;
   }
   return null;

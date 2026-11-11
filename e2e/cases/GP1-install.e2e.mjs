@@ -585,7 +585,14 @@ import { vscodeMcpFile } from "../harness/vscode-user-dir.mjs";
       const hooks = readJson(m).hooks;
       if (typeof hooks === "string") named.add(hooks.startsWith("./") ? hooks.slice(2) : hooks); // qwen names "hooks/qwen.json" (D-FU-RM-QWEN-1)
     }
-    for (const s of servers()) named.add(strip(s.args[0]));
+    // kaovilai/context-mode#11 review (pre-existing since PR #10, ADR-0026): the claude-code
+    // manifest's MCP entry is type http — the daemon URL, no local command — so it names no file.
+    // A stdio entry that is missing args or command is a broken manifest, never a skip (CodeRabbit review).
+    for (const s of servers()) {
+      if (s.type === "http") continue;
+      assert.ok(Array.isArray(s.args), "stdio server args must be an array: " + JSON.stringify(s));
+      named.add(strip(s.args[0]));
+    }
     for (const h of hookFiles()) {
       named.add(h);
       for (const c of commands(readJson(h))) named.add(strip(c.split(" ")[1]));
@@ -594,7 +601,12 @@ import { vscodeMcpFile } from "../harness/vscode-user-dir.mjs";
   });
 
   test("[M6] GP1/plugin-json-unpinned-node: every manifest MCP command is the bare node (#1090)", () => {
-    for (const s of servers()) assert.equal(s.command, "node");
+    // ADR-0026: the claude-code entry is type http (the daemon URL), so there is no command to pin.
+    // A stdio entry with a missing or non-node command is a broken manifest, never a skip (CodeRabbit review).
+    for (const s of servers()) {
+      if (s.type === "http") continue;
+      assert.equal(s.command, "node", "stdio server command must be the bare node: " + JSON.stringify(s));
+    }
   });
 
   test("[M6] GP1/stable-interpreter-path: every written hook command starts with the bare node, never a pinned path (#1183)", () => {

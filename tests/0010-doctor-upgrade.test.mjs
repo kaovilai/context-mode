@@ -2606,12 +2606,12 @@ describe("ADR-0010 doctor: hook-runs check per agent (GP11)", { concurrency: CON
     return { home, env, reg: buildRegistry({ home, pkgDir, env }) };
   }
 
-  test("H5: doctor hook-runs PASSES on all 10 hosts with the real hook: the large shell read gets the saving effect", (t) => {
+  test("H5: doctor hook-runs PASSES on all 10 hosts with the real hook: the large shell read gets the saving effect", async (t) => {
     const s = sandbox(t, REAL_HOOK);
     assert.equal(s.reg.length, ADAPTERS.length);
     assert.equal(s.reg.length, 10);
     for (const row of s.reg) {
-      const c = hookRunsCheck(row, s.env);
+      const c = await hookRunsCheck(row, s.env);
       assert.equal(c.name, "hook-runs", row.id);
       assert.equal(c.ok, true, row.id + ": " + c.detail);
     }
@@ -2619,19 +2619,19 @@ describe("ADR-0010 doctor: hook-runs check per agent (GP11)", { concurrency: CON
     assert.equal(existsSync(path.join(s.home, ".context-mode")), false, "doctor wrote into HOME/.context-mode");
   });
 
-  test("H5: doctor hook-runs FAILS on every host when the hook answers nothing (no saving decision)", (t) => {
+  test("H5: doctor hook-runs FAILS on every host when the hook answers nothing (no saving decision)", async (t) => {
     const s = sandbox(t, SILENT_HOOK);
     for (const row of s.reg) {
-      const c = hookRunsCheck(row, s.env);
+      const c = await hookRunsCheck(row, s.env);
       assert.equal(c.ok, false, row.id + " a silent hook is a false PASS");
       assert.ok(c.detail.includes("no saving decision"), row.id + ": " + c.detail);
     }
   });
 
-  test("H5: doctor hook-runs FAILS on every host when the hook cannot resolve the project (NO_PROJECT)", (t) => {
+  test("H5: doctor hook-runs FAILS on every host when the hook cannot resolve the project (NO_PROJECT)", async (t) => {
     const s = sandbox(t, NO_PROJECT_HOOK);
     for (const row of s.reg) {
-      const c = hookRunsCheck(row, s.env);
+      const c = await hookRunsCheck(row, s.env);
       assert.equal(c.ok, false, row.id + " a NO_PROJECT hook is a false PASS");
       assert.ok(c.detail.includes("NO_PROJECT"), row.id + ": " + c.detail);
     }
