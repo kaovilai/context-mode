@@ -110,7 +110,36 @@ const home = path.join(tmp, "home"), project = path.join(tmp, "project");
 mkdirSync(home); mkdirSync(project);
 cpSync(DATA, path.join(project, "data"), { recursive: true });
 execFileSync("git", ["init", "-q", project]);
-const env = { PATH: process.env.PATH ?? "", SystemRoot: process.env.SystemRoot ?? "", PATHEXT: process.env.PATHEXT ?? "", ComSpec: process.env.ComSpec ?? "", HOME: home, USERPROFILE: home, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_PROJECT_DIR: project };
+// kaovilai/context-mode#11: the hook bundle gates its replace route on the daemon's /healthz. A bench
+// machine runs no daemon, so without this stub every large fixture would fail open and the hook part
+// would stop measuring the replace it exists to measure. The stub answers 204 on /healthz, exactly
+// like the daemon (daemon.ts DAEMON_HEALTH_PATH); the env var is DAEMON_PORT_ENV in src constants.
+// A detached child, not an in-process server: hook() below uses spawnSync, which freezes this
+// process' event loop, and an in-process stub could then never answer the hook's probe. The child
+// prints its port followed by a newline; the parent buffers until that newline, so a split stdout
+// delivery never resolves a half port number. A stub that never prints is killed, never orphaned.
+let stubPort = 0;
+const stub = spawn(process.execPath, ["-e", 'const{createServer}=require("node:http");const s=createServer((q,r)=>{if(q.url==="/healthz")r.writeHead(204).end();else r.writeHead(404).end();});s.listen(0,"127.0.0.1",()=>process.stdout.write(String(s.address().port)+"\\n"));'], { stdio: ["ignore", "pipe", "inherit"] });
+try {
+  stubPort = await new Promise((resolve, reject) => {
+    let out = "";
+    const watchdog = setTimeout(() => reject(new Error("stub daemon did not print its port")), 10000);
+    stub.stdout.setEncoding("utf8");
+    stub.stdout.on("data", (d) => {
+      out += d;
+      const nl = out.indexOf("\n");
+      if (nl < 0) return;
+      const p = Number(out.slice(0, nl).trim());
+      if (p > 0) { clearTimeout(watchdog); resolve(p); }
+    });
+    stub.on("error", (err) => { clearTimeout(watchdog); reject(err); });
+  });
+} catch (err) {
+  stub.kill();
+  console.error("stub daemon failed: " + (err?.message ?? err));
+  process.exit(1);
+}
+const env = { PATH: process.env.PATH ?? "", SystemRoot: process.env.SystemRoot ?? "", PATHEXT: process.env.PATHEXT ?? "", ComSpec: process.env.ComSpec ?? "", HOME: home, USERPROFILE: home, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_PROJECT_DIR: project, CONTEXT_MODE_DAEMON_PORT: String(stubPort) };
 
 const rows = [];
 try {
@@ -158,6 +187,7 @@ try {
   }
   await c.close();
 } finally {
+  stub.kill();
   rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
