@@ -21,7 +21,7 @@
 // uniquely tagged "lines" separated by a blank line so each line is its own chunkText "text"-kind block
 // (05-tools-index.md §2 step 2) — well under MAX_CHUNK_BYTES (4096), so no chunk boundary ever falls inside
 // a line. A returned line that is not byte-identical to one of the input's own lines means something was cut.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -133,6 +133,33 @@ function writeAgent(reposDir, type, tools) {
   );
 }
 
+let stubDaemon = null; // kaovilai/context-mode#11: a detached child answering 204 on /healthz, so the
+// hook's replace gate stays armed on a machine without the real daemon. Detached, not in-process:
+// postToolUse below uses spawnSync, which freezes this process' event loop (an in-process stub
+// could never answer the probe). Prints its port + newline; the parent buffers until the newline so
+// a split delivery never resolves a half port. Killed in main()'s finally.
+function stubDaemonEnv() {
+  if (stubDaemon === null) {
+    stubDaemon = spawn(process.execPath, ["-e", 'const{createServer}=require("node:http");const s=createServer((q,r)=>{if(q.url==="/healthz")r.writeHead(204).end();else r.writeHead(404).end();});s.listen(0,"127.0.0.1",()=>process.stdout.write(String(s.address().port)+"\\n"));'], { stdio: ["ignore", "pipe", "inherit"] });
+    // fail() exits the process mid-run (assertion or budget), skipping main()'s finally — this
+    // exit hook still kills the child, so no check run leaves a stub behind (Copilot review).
+    process.on("exit", () => { if (stubDaemon !== null) stubDaemon.kill(); });
+  }
+  return new Promise((resolve, reject) => {
+    let out = "";
+    const watchdog = setTimeout(() => reject(new Error("stub daemon did not print its port")), 10000);
+    stubDaemon.stdout.setEncoding("utf8");
+    stubDaemon.stdout.on("data", (d) => {
+      out += d;
+      const nl = out.indexOf("\n");
+      if (nl < 0) return;
+      const p = Number(out.slice(0, nl).trim());
+      if (p > 0) { clearTimeout(watchdog); resolve({ CONTEXT_MODE_DAEMON_PORT: String(p), CTX_MODE_BYPASS: "0" }); } // CodeRabbit review: a globally-exported bypass must not flip this replace check to fail-open
+    });
+    stubDaemon.on("error", (err) => { clearTimeout(watchdog); reject(err); });
+  });
+}
+
 function fixture() {
   const root = mkdtempSync(path.join(tmpdir(), "cm-case-b-index-"));
   const repo = path.join(root, "repo");
@@ -233,6 +260,13 @@ async function main() {
   }
 
   const f = fixture();
+  try {
+    Object.assign(f.env, await stubDaemonEnv()); // #11: keep the replace gate armed without a real daemon
+  } catch (err) {
+    if (stubDaemon !== null) stubDaemon.kill();
+    cleanup(f);
+    return fail("stub daemon failed: " + (err?.message ?? err));
+  }
   const sizeResults = [];
   try {
     for (const size of SIZES) {
@@ -246,6 +280,7 @@ async function main() {
   } catch (err) {
     return fail(err?.message ?? String(err));
   } finally {
+    if (stubDaemon !== null) stubDaemon.kill();
     cleanup(f);
   }
 

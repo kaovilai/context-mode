@@ -1517,6 +1517,7 @@ describe("ADR-0008 privacy: network call sites in src (D-PRIVACY-NET-1)", { conc
     "src/core/contracts/constants.ts": ["fetch(", "GIT_LS_REMOTE", "GIT_CLONE_ARGS"], // the constants themselves (FETCH_CALL is a deny pattern)
     "src/core/ops/doctor-env.ts": ["fetch(", "GIT_LS_REMOTE"], // doctor D1: GET registry.npmjs.org/-/package/context-mode/dist-tags; after an npm failure, git ls-remote --tags --refs <release repo> v* (D-DOCTOR-D1-TAGS-1)
     "src/setup/engine.ts": ["fetch("], // ADR-0026 daemonCheck: GET 127.0.0.1:<port>/healthz, the daemon's own loopback liveness probe (2.2.5; never an egress)
+    "src/core/hooks/daemon-gate.ts": ["node:http"], // kaovilai/context-mode#11: the hook's GET 127.0.0.1:<port>/healthz before a replace or read-deny routes the model at ctx_* tools; loopback only, never an egress
     "src/core/sandbox/fetch.ts": ["node:http", "node:net", "node:tls", "node:dns"], // ctx_index / ctx_fetch of a URL the agent asks for
     "src/entries/daemon.ts": ["node:http", "node:net", "fetch("], // ADR-0026: the loopback listener (127.0.0.1 only) of the shared daemon; node:net is the AddressInfo type; fetch( is the SDK handler method the listener hands the already-received request to, not a network egress
   };

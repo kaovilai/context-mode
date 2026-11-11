@@ -13,7 +13,7 @@ import { ctxSearch } from "../src/core/tools/search.ts";
 import { ctxStats } from "../src/core/tools/stats.ts";
 import { chunkText } from "../src/core/index/chunk.ts";
 import { getAdapter, ADAPTERS, hasRecall, hasReplace } from "../src/adapters/table.ts";
-import { COMPACT_POINTER_LINE, OUTPUT_CAP, REPLACE_TRIGGER_BYTES, REPLACE_RETURN_BYTES, REPLACE_CHUNK_BYTES, SYNC_INDEX_MAX_BYTES, PENDING_COMPACT_META_PREFIX, DECISION_OPTION_KEY, DECISION_SOURCE, RECALL_BUDGET_BYTES, RECALL_CLOSE_TAG, RECALL_OPEN_TAG, STATE_BUDGET, HOOK_TIMEOUT_MS,D5_LAST_HOOK_ERROR, MCP_HINT_EVERY, PARSE_ERROR_DENY_LINE, POLICY_UNREADABLE_LINE, REPLACE_HANDLE_LINE, REQUIRE_SECURITY_ENV, TOOL_ORDER, prefixToolNames } from "../src/core/contracts/constants.ts";
+import { BYPASS_ENV, COMPACT_POINTER_LINE, DAEMON_PORT_ENV, OUTPUT_CAP, REPLACE_TRIGGER_BYTES, REPLACE_RETURN_BYTES, REPLACE_CHUNK_BYTES, SYNC_INDEX_MAX_BYTES, PENDING_COMPACT_META_PREFIX, DECISION_OPTION_KEY, DECISION_SOURCE, RECALL_BUDGET_BYTES, RECALL_CLOSE_TAG, RECALL_OPEN_TAG, STATE_BUDGET, HOOK_TIMEOUT_MS,D5_LAST_HOOK_ERROR, MCP_HINT_EVERY, PARSE_ERROR_DENY_LINE, POLICY_UNREADABLE_LINE, REPLACE_HANDLE_LINE, REQUIRE_SECURITY_ENV, TOOL_ORDER, USER_DENY_REASON_PREFIX, prefixToolNames } from "../src/core/contracts/constants.ts";
 import { answerDecisions, askOptionLabels, listOptionLabels, optionEchoDecision } from "../src/core/hooks/decision.ts";
 import { decode } from "../src/adapters/claude-code.ts";
 import { openDb, closeDb, withWrite, metaGet } from "../src/core/store/db.ts";
@@ -23,9 +23,11 @@ import { lastHookError, logHookError, hookLogPath } from "../src/core/hooks/fall
 import { encode } from "../src/adapters/kiro.ts";
 import { generateManifests } from "../build/manifests.ts";
 import { resolveProject } from "../src/core/project/resolve.ts";
-import { decide } from "../src/core/policy/decide.ts";
+import { decide, denyMessage } from "../src/core/policy/decide.ts";
+import { hookBypassed } from "../src/core/hooks/daemon-gate.ts";
+import { DEAD_PORT, HTTP_ENTRY, STDIO_ENTRY, gateBed, withBundle } from "./_lib/daemon-gate-fixtures.mjs";
 import { decode as copilotDecode } from "../src/adapters/copilot-cli.ts";
-import { READ_DENY_MESSAGE } from "../src/core/policy/read-deny.ts";
+import { READ_DENY_MARK, READ_DENY_MESSAGE, READ_DENY_RANGE_MESSAGE, isReadDeny } from "../src/core/policy/read-deny.ts";
 import { pathToFileURL } from "node:url";
 import { shouldHint } from "../src/core/hooks/throttle.ts";
 import { renderState } from "../src/core/compaction/render.ts";
@@ -2955,4 +2957,222 @@ describe("PRD-v2 section 10: usage rows", () => {
     const second = await ctx(); // marker taken: no compact state a second time
     assert.notEqual(second.stdout, first.stdout);
   });
+});
+
+// kaovilai/context-mode#11, hook-runtime side (PRD-v2 section 10 owns the dispatch, replace and
+// deny paths): the hooks keep intercepting tool results after the MCP server is down. The gate
+// (tests/_lib/daemon-gate-fixtures.mjs) probes the daemon's /healthz before a replace or a
+// ctx-routing deny; down means fail open. Serial: withBundle patches process.argv[1].
+describe("kaovilai/context-mode#11: fail open when the daemon the routes point at is down (hooks side)", () => {
+  const CC = getAdapter("claude-code");
+  let bed;
+  let oldHome; // resolveConfigDir reads the process env (D-M1-T3-5), so the bed's HOME is set for the block
+
+  before(async () => {
+    bed = await gateBed();
+    oldHome = process.env.HOME;
+    process.env.HOME = bed.root; process.env.USERPROFILE = bed.root;
+  });
+  after(() => {
+    process.env.HOME = oldHome;
+    bed.close();
+  });
+
+  test("#11 isReadDeny pins both deny texts: the mark is in the templates, not just the helper", () => {
+    assert.ok(READ_DENY_MESSAGE("{p}", 1, "").includes(READ_DENY_MARK), "the ctx_execute deny text carries the mark");
+    assert.ok(READ_DENY_RANGE_MESSAGE("{p}", 1).includes(READ_DENY_MARK), "the ranged-route deny text carries the mark");
+    assert.ok(isReadDeny(READ_DENY_MESSAGE("/x/big.log", 99999, CC.toolNamePrefix)));
+    assert.ok(isReadDeny(READ_DENY_RANGE_MESSAGE("/x/big.log", 99999)));
+    assert.equal(isReadDeny("user deny: Bash(cat:*) matched"), false);
+    // Copilot review: denyMessage embeds the caller's description, so a size-guess deny whose
+    // description names the mark must not classify as a read-deny (it would keep the dead
+    // ctx_execute route instead of failing open).
+    const poisoned = denyMessage("shell", "curl https://x.y", CC, "inspect the file over the one-read limit");
+    assert.ok(poisoned.includes(READ_DENY_MARK), "the poisoned description is in the reason");
+    assert.equal(isReadDeny(poisoned), false, "a size-guess deny is never a read-deny");
+  });
+
+  test("#11 hookBypassed reads CTX_MODE_BYPASS=1 only", () => {
+    assert.equal(hookBypassed({ [BYPASS_ENV]: "1" }), true);
+    assert.equal(hookBypassed({}), false);
+    assert.equal(hookBypassed({ [BYPASS_ENV]: "0" }), false);
+    assert.equal(hookBypassed({ [BYPASS_ENV]: "" }), false);
+  });
+
+  test("#11 PostToolUse: a large Bash output fails open when the daemon is down (no ctx_search pointer)", async () => {
+    await withBundle(HTTP_ENTRY, async () => {
+      const text = "SECRET-11 value=gated\n" + "filler line\n".repeat(3000);
+      const out = await handleHook("claude-code", bashPost(text), { ...bed.env, [DAEMON_PORT_ENV]: String(DEAD_PORT) });
+      assert.equal(out.exitCode, 0);
+      assert.equal(out.stdout, "", "claude-code allow shape: empty stdout, the host's whole output stands");
+    });
+  });
+
+  test("#11 a fail-open output is still indexed, so ctx_search finds it after recovery (Copilot review)", async () => {
+    await withBundle(HTTP_ENTRY, async () => {
+      const text = "SECRET-11 value=indexed-while-down\n" + "filler line\n".repeat(3000);
+      const out = await handleHook("claude-code", bashPost(text), { ...bed.env, [DAEMON_PORT_ENV]: String(DEAD_PORT) });
+      assert.equal(out.stdout, "", "the output stood whole (fail open)");
+      const projects = join(bed.root, ".context-mode", "projects");
+      const dbs = readdirSync(projects).map((k) => join(projects, k, "context.db")).filter((p) => existsSync(p));
+      assert.equal(dbs.length, 1, "one project db");
+      const db = new DatabaseSync(dbs[0], { readOnly: true });
+      try {
+        const src = db.prepare("SELECT id FROM sources WHERE kind = 'content'").all();
+        assert.ok(src.length >= 1, "the fail-open output got its source row");
+        const chunks = db.prepare("SELECT COUNT(*) AS n FROM chunks WHERE source_id = ?").get(src[0].id);
+        assert.ok(chunks.n > 0, "the fail-open output got its chunks: " + chunks.n);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  test("#11 PostToolUse: the replace still happens when the daemon answers, and the bypass stands it down", async () => {
+    const text = "SECRET-11 value=up\n" + "filler line\n".repeat(3000);
+    await withBundle(HTTP_ENTRY, async () => {
+      const replaced = updatedOf(await handleHook("claude-code", bashPost(text), { ...bed.env, [DAEMON_PORT_ENV]: String(bed.up204) }));
+      assert.ok(replaced.stdout.includes("ctx_search("), "daemon up: the pointer is reachable, the replace happens");
+      assert.ok(Buffer.byteLength(replaced.stdout) < Buffer.byteLength(text) / 10, "the replace actually saved context");
+      const bypassed = await handleHook("claude-code", bashPost(text), { ...bed.env, [DAEMON_PORT_ENV]: String(bed.up204), [BYPASS_ENV]: "1" });
+      assert.equal(bypassed.stdout, "", "CTX_MODE_BYPASS=1: whole output even with the daemon up");
+    });
+  });
+
+  test("#11 PreToolUse Read of a big file: down re-routes serverless, bypass allows, up denies with ctx_execute", async () => {
+    await withBundle(HTTP_ENTRY, async () => {
+      const hd = hookSpecificOf(await handleHook("claude-code", readBig(), { ...bed.env, [DAEMON_PORT_ENV]: String(DEAD_PORT) }));
+      assert.equal(hd.permissionDecision, "deny");
+      assert.ok(hd.permissionDecisionReason.includes("offset and limit"), hd.permissionDecisionReason);
+      assert.equal(hd.permissionDecisionReason.includes("ctx_execute("), false, "no dead-tool route in the deny");
+
+      const hu = hookSpecificOf(await handleHook("claude-code", readBig(), { ...bed.env, [DAEMON_PORT_ENV]: String(bed.up204) }));
+      assert.equal(hu.permissionDecision, "deny");
+      assert.ok(hu.permissionDecisionReason.includes(CC.toolNamePrefix + "ctx_execute("), "daemon up: the ctx_execute route, as before");
+
+      const bypassed = await handleHook("claude-code", readBig(), { ...bed.env, [DAEMON_PORT_ENV]: String(bed.up204), [BYPASS_ENV]: "1" });
+      assert.equal(bypassed.stdout, "", "CTX_MODE_BYPASS=1: the read is allowed (claude-code allow shape is empty stdout)");
+    });
+  });
+
+  test("#11 a WebFetch deny routes at ctx_index and fails open when the daemon is down (Copilot review)", async () => {
+    const fetch = () => ({ session_id: "s-" + Math.random().toString(36).slice(2), cwd: bed.repo, hook_event_name: "PreToolUse", tool_name: "WebFetch", tool_input: { url: "https://example.com/page" } });
+    await withBundle(HTTP_ENTRY, async () => {
+      const down = await handleHook("claude-code", fetch(), { ...bed.env, [DAEMON_PORT_ENV]: String(DEAD_PORT) });
+      assert.equal(down.stdout, "", "daemon down: the webfetch deny fails open (claude-code allow shape is empty stdout)");
+
+      const bypassed = await handleHook("claude-code", fetch(), { ...bed.env, [DAEMON_PORT_ENV]: String(bed.up204), [BYPASS_ENV]: "1" });
+      assert.equal(bypassed.stdout, "", "CTX_MODE_BYPASS=1: the fetch is allowed even with the daemon up");
+
+      const up = await handleHook("claude-code", fetch(), { ...bed.env, [DAEMON_PORT_ENV]: String(bed.up204) });
+      const hu = hookSpecificOf(up);
+      assert.equal(hu.permissionDecision, "deny", "example.com is not on the never-deny host list");
+      assert.ok(hu.permissionDecisionReason.includes(CC.toolNamePrefix + "ctx_index"), "daemon up: the ctx_index route, as before");
+    });
+  });
+
+  test("#11 decide(toolsDown): the big-file deny takes the ranged route even inside the project", () => {
+    const ev = { event: "PreToolUse", agent: "claude-code", sessionId: "s1", cwd: bed.repo, tool: { name: "Read", canonicalName: "Read", input: { file_path: bed.big } } };
+    const normal = decide(ev, CC, [], bed.repo, false);
+    assert.equal(normal.kind, "deny");
+    assert.equal(normal.reason, READ_DENY_MESSAGE(bed.big, statSync(bed.big).size, CC.toolNamePrefix));
+    const down = decide(ev, CC, [], bed.repo, true);
+    assert.equal(down.kind, "deny");
+    assert.equal(down.reason, READ_DENY_RANGE_MESSAGE(bed.big, statSync(bed.big).size));
+  });
+
+  test("#11 empty query: an MCP call with no known intent key never indexes under an empty query", async () => {
+    // Gate off (no manifest next to this process' argv[1]): the replace path itself is under test.
+    const text = "thread body\n".repeat(1500);
+    const p = {
+      session_id: "s-" + Math.random().toString(36).slice(2), cwd: bed.repo, hook_event_name: "PostToolUse",
+      tool_name: "mcp__t3-code__t3_thread_read", tool_input: { threadId: "thread-1" },
+      tool_use_id: "toolu_tr", tool_response: text,
+    };
+    const out = await handleHook("claude-code", p, bed.env);
+    const updated = updatedOf(out);
+    const s = typeof updated === "string" ? updated : updated.stdout ?? JSON.stringify(updated);
+    assert.ok(s.includes("ctx_search("), "the replace happened (gate off, as in a src import or stdio bundle)");
+    const at = s.indexOf("queries:[");
+    assert.ok(at >= 0, "a handle line is present");
+    const queries = JSON.parse(s.slice(at + "queries:".length, s.indexOf("]", at) + 1));
+    assert.ok(queries.length > 0 && queries[0].trim() !== "", "the first query is never empty: " + JSON.stringify(queries));
+  });
+
+  test("#11 the user's own rules stay enforced through the bypass and a daemon outage (Copilot review)", async () => {
+    // Project deny rules live in <repo>/.claude/settings.json permissions.deny (user-deny.ts).
+    // Removed again in finally: the repo is shared by every test in this describe.
+    mkdirSync(join(bed.repo, ".claude"), { recursive: true });
+    const settings = join(bed.repo, ".claude", "settings.json");
+    const curl = (sid, command = "rm -rf /tmp/x") => ({ session_id: sid, cwd: bed.repo, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } });
+    const variants = [
+      ["daemon down", { [DAEMON_PORT_ENV]: String(DEAD_PORT) }],
+      ["bypassed", { [DAEMON_PORT_ENV]: String(bed.up204), [BYPASS_ENV]: "1" }],
+      ["bypassed and down", { [DAEMON_PORT_ENV]: String(DEAD_PORT), [BYPASS_ENV]: "1" }],
+    ];
+    try {
+      // 1. A user deny rule: denied everywhere, with the policy reason, never re-routed or allowed.
+      writeFileSync(settings, JSON.stringify({ permissions: { deny: ["Bash(rm -rf:*)"] } }));
+      await withBundle(HTTP_ENTRY, async () => {
+        for (const [label, extra] of variants) {
+          const h = hookSpecificOf(await handleHook("claude-code", curl("deny-" + label.replace(/\W+/g, "-")), { ...bed.env, ...extra }));
+          assert.equal(h.permissionDecision, "deny", label);
+          assert.ok(h.permissionDecisionReason.startsWith(USER_DENY_REASON_PREFIX), label + ": " + h.permissionDecisionReason);
+        }
+      });
+      // 2. A parse error over a rule the command could match (the prd10 shape: the raw command does
+      //    not match the pattern, the unparsed text could): the parse-error deny stands.
+      await withBundle(HTTP_ENTRY, async () => {
+        for (const [label, extra] of variants) {
+          const h = hookSpecificOf(await handleHook("claude-code", curl("parse-" + label.replace(/\W+/g, "-"), 'ls; rm -rf / "x'), { ...bed.env, ...extra }));
+          assert.equal(h.permissionDecision, "deny", label);
+          assert.equal(h.permissionDecisionReason, prefixToolNames(PARSE_ERROR_DENY_LINE, CC.toolNamePrefix), label);
+        }
+      });
+      // 3. An unreadable policy file with CONTEXT_MODE_REQUIRE_SECURITY=1: fail-closed stands.
+      //    (decide reads that var from the process env, so it is set for the block and restored.)
+      writeFileSync(settings, "{ not json");
+      const oldReq = process.env.CONTEXT_MODE_REQUIRE_SECURITY;
+      process.env.CONTEXT_MODE_REQUIRE_SECURITY = "1";
+      try {
+        await withBundle(HTTP_ENTRY, async () => {
+          for (const [label, extra] of variants) {
+            const h = hookSpecificOf(await handleHook("claude-code", curl("unreadable-" + label.replace(/\W+/g, "-")), { ...bed.env, ...extra }));
+            assert.equal(h.permissionDecision, "deny", label);
+            assert.equal(h.permissionDecisionReason, prefixToolNames(POLICY_UNREADABLE_LINE, CC.toolNamePrefix), label);
+          }
+        });
+      } finally {
+        if (oldReq === undefined) delete process.env.CONTEXT_MODE_REQUIRE_SECURITY; else process.env.CONTEXT_MODE_REQUIRE_SECURITY = oldReq;
+      }
+    } finally {
+      rmSync(settings, { force: true });
+    }
+  });
+
+  // ---- helpers ----
+
+  function bashPost(stdoutText) {
+    return {
+      session_id: "s-" + Math.random().toString(36).slice(2), cwd: bed.repo, hook_event_name: "PostToolUse",
+      tool_name: "Bash", tool_input: { command: "cat big.log", description: "needle target" },
+      tool_use_id: "toolu_" + Math.random().toString(36).slice(2),
+      tool_response: { stdout: stdoutText, stderr: "", interrupted: false, isImage: false },
+    };
+  }
+
+  function readBig() {
+    return { session_id: "s-" + Math.random().toString(36).slice(2), cwd: bed.repo, hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: bed.big } };
+  }
+
+  function updatedOf(out) {
+    assert.equal(out.exitCode, 0);
+    assert.notEqual(out.stdout, "", "an update shape was expected");
+    return JSON.parse(out.stdout).hookSpecificOutput.updatedToolOutput;
+  }
+
+  function hookSpecificOf(out) {
+    assert.equal(out.exitCode, 0);
+    return JSON.parse(out.stdout).hookSpecificOutput;
+  }
 });

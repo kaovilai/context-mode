@@ -44,7 +44,7 @@ Status: accepted 2026-10-30, move done. Decision record: [ADR-0024](adr/0024-tes
 | prd12-stats-purge | PRD-v2 sections 8 and 12, GP10 | `tests/prd12-stats-purge.test.mjs` | stats and purge tools | 21 | 5.8 |
 | 0008-enforcement | ADR-0001, ADR-0008, PRD-v2 section 10, GP3 | `tests/0008-enforcement.test.mjs` | policy: lexer, parse, decide, deny rules, unwrap, external MCP | 176 | 1.4 |
 | 0016-subagent | ADR-0016 | `tests/0016-subagent.test.mjs` | subagent context protection, run wrapper, VS Code tools | 56 | 1.9 |
-| prd10-hooks-runtime | PRD-v2 section 10, GP3, GP6, GP7 | `tests/prd10-hooks-runtime.test.mjs` | hook process: stdin, entry, dispatch, saving, errors, throttle | 280 | 23.0 |
+| prd10-hooks-runtime | PRD-v2 section 10, GP3, GP6, GP7 | `tests/prd10-hooks-runtime.test.mjs` | hook process: stdin, entry, dispatch, saving, errors, throttle, daemon-down fail-open decision paths (#11) | 290 | 23.5 |
 | prd10-hook-fuzz | PRD-v2 section 10 | `tests/prd10-hook-fuzz.test.mjs` | seeded hook fuzz on every host (the long pole; one file on purpose) | 22 | 51.1 |
 | 0009-compaction-memory | ADR-0009, PRD-v2 section 11, GP6 | `tests/0009-compaction-memory.test.mjs` | compaction, journal, resume, recall, search decision | 79 | 3.7 |
 | 0020-adapters | ADR-0020, PRD-v2 section 3 | `tests/0020-adapters.test.mjs` | agent adapters and the host table | 182 | 2.8 |
@@ -65,7 +65,7 @@ Status: accepted 2026-10-30, move done. Decision record: [ADR-0024](adr/0024-tes
 | 0014-repo-hygiene | ADR-0013, ADR-0014, ADR-0015 | `tests/0014-repo-hygiene.test.mjs` | issue forms, workflows, README, secrets, removed files | 80 | 3.6 |
 | 0023-install-docs | ADR-0023, PRD-setup | `tests/0023-install-docs.test.mjs` | install docs per agent use the native install command | 44 | 0.8 |
 | 0021-cache-safety | ADR-0021 | `tests/0021-cache-safety.test.mjs` | prompt cache safety, prefix determinism, cache usage | 37 | 9.5 |
-| 0026-daemon | ADR-0026 | `tests/0026-daemon.test.mjs` | shared HTTP daemon: entry, flags, unit, per-session identity, one process, doctor D12, stdio default | 13 | 12.0 |
+| 0026-daemon | ADR-0026 | `tests/0026-daemon.test.mjs` | shared HTTP daemon: entry, flags, unit, per-session identity, one process, doctor D12, stdio default, daemon-down gate (#11) | 20 | 12.5 |
 
 Groups marked "stay in place" are already one file per area; the move does not touch them. The other groups merge their source files into the one target file. 252 existing files move; the sources of every group are in review/test-layout/groups.json.
 

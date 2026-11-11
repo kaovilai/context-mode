@@ -588,7 +588,7 @@ Commands in the agent: `/ctx-stats` shows the `ctx_stats` result, `/ctx-doctor` 
 ## Security and privacy
 
 - The plugin keeps all its data on your machine, one database per project in `~/.context-mode`, and `ctx_purge` deletes it by session, source or project. Read the [Security guide](https://contextmode.ai/docs/engine/security?utm_source=github&utm_medium=readme&utm_content=security).
-- The plugin has zero telemetry: usage data, events and crash reports stay on your machine. It uses the network for four calls, each one started by you or your agent:
+- The plugin has zero telemetry: usage data, events and crash reports stay on your machine. It uses the network for five calls, each one started by you or your agent:
 
 | Call | When | File |
 |---|---|---|
@@ -596,6 +596,7 @@ Commands in the agent: `/ctx-stats` shows the `ctx_stats` result, `/ctx-doctor` 
 | One read of the npm dist-tags, with `git ls-remote` of the release tags as the fallback | You run `context-mode doctor`, to check for a new version | [doctor-env.ts](src/core/ops/doctor-env.ts) |
 | `npm i -g context-mode`, or `gh issue create` | You run `context-mode upgrade`, or you press a key to send the debug report | [commands.ts](src/cli/commands.ts) |
 | A loopback listen on 127.0.0.1, and its health probe | You opt into the [shared daemon](#many-sessions-one-process) | [daemon.ts](src/entries/daemon.ts) |
+| A loopback health probe of that daemon | The hook is about to replace a large tool result with a search pointer, or deny a big read: it checks the daemon it would point at answers, and lets the output through whole whenever the daemon stays silent | [daemon-gate.ts](src/core/hooks/daemon-gate.ts) |
 | Your agent's own install command, npm or git | You install or update | Your agent |
 
 - The guard test D-PRIVACY-NET-1 in [tests/0008-enforcement.test.mjs](tests/0008-enforcement.test.mjs) scans the source for HTTP clients, sockets, DNS lookups, git network calls and gh or npm spawns. It flags each new call site, so this table stays true.

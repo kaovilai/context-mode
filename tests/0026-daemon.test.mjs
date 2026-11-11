@@ -22,6 +22,8 @@ import { checkDaemon } from "../src/core/ops/doctor-env.ts";
 import { isAbsoluteWorkspacePath } from "../src/entries/daemon.ts";
 import { sessionIdOf } from "../src/entries/server-core.ts";
 import { DAEMON_ADD_CAVEAT, DAEMON_ADD_COMMAND, DAEMON_CHECK_FIX, DAEMON_DEFAULT_PORT, DAEMON_PORT_ENV, DAEMON_SESSION_HEADER } from "../src/core/contracts/constants.ts";
+import { daemonEntryExpected, daemonToolsDown, effectiveMcpTarget } from "../src/core/hooks/daemon-gate.ts";
+import { DEAD_PORT, HTTP_ENTRY, STDIO_ENTRY, fakeBundle, gateBed, withBundle } from "./_lib/daemon-gate-fixtures.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 
@@ -585,5 +587,157 @@ describe("A26 review round 1", { concurrency: false }, () => {
     assert.ok(JSON.stringify(own.content).includes("sandworm"), "session B must find its own project's rows");
     await a.client.close();
     await b.client.close();
+  });
+});
+
+// kaovilai/context-mode#11, daemon side (ADR-0026 owns the daemon and its reachability): the hook
+// gate that probes /healthz before routing the model at ctx_* tools. The gate's pieces live in
+// src/core/hooks/daemon-gate.ts; the hook-decision-path tests are in prd10-hooks-runtime. Serial:
+// withBundle patches process.argv[1].
+describe("kaovilai/context-mode#11: the daemon-down gate (daemon side)", { concurrency: false }, () => {
+  let bed;
+
+  before(async () => { bed = await gateBed(); });
+  after(() => bed.close());
+
+  test("#11 daemonEntryExpected: the http manifest arms the gate; stdio or none does not", async () => {
+    await withBundle(HTTP_ENTRY, () => {
+      assert.equal(daemonEntryExpected(), true);
+    });
+    await withBundle(STDIO_ENTRY, () => {
+      assert.equal(daemonEntryExpected(), false);
+    });
+    await withBundle(null, () => {
+      assert.equal(daemonEntryExpected(), false);
+    });
+  });
+
+  test("#11 daemonToolsDown: 204 is up; refused and 404 are down; a stdio bundle never gates", async () => {
+    await withBundle(HTTP_ENTRY, async () => {
+      assert.equal(await daemonToolsDown({ [DAEMON_PORT_ENV]: String(bed.up204) }, "claude-code"), false, "the daemon's 204 means up");
+      assert.equal(await daemonToolsDown({ [DAEMON_PORT_ENV]: String(DEAD_PORT) }, "claude-code"), true, "a refused port means down");
+      assert.equal(await daemonToolsDown({ [DAEMON_PORT_ENV]: String(bed.notDaemon) }, "claude-code"), true, "a 404 answer means down");
+    });
+    await withBundle(STDIO_ENTRY, async () => {
+      assert.equal(await daemonToolsDown({ [DAEMON_PORT_ENV]: String(DEAD_PORT) }, "claude-code"), false, "a stdio bundle never probes");
+    });
+  });
+
+  test("#11 effectiveMcpTarget: URL-expansion semantics, the entry's own view of the port", async () => {
+    // The plugin URL expands ${CONTEXT_MODE_DAEMON_PORT} raw into http://127.0.0.1:<value>/mcp;
+    // the resolver must read the value exactly that way (CodeRabbit review, two rounds).
+    assert.deepEqual(effectiveMcpTarget({}), { port: DAEMON_DEFAULT_PORT }, "unset keeps the ${VAR:-default} expansion's default");
+    assert.deepEqual(effectiveMcpTarget({ [DAEMON_PORT_ENV]: "" }), { port: DAEMON_DEFAULT_PORT }, "empty keeps the default (:- treats empty as unset)");
+    assert.deepEqual(effectiveMcpTarget({ [DAEMON_PORT_ENV]: "9001" }), { port: 9001 });
+    assert.deepEqual(effectiveMcpTarget({ [DAEMON_PORT_ENV]: "80" }), { port: 80 }, "the scheme's default port: new URL() drops it, the entry still targets it");
+    assert.deepEqual(effectiveMcpTarget({ [DAEMON_PORT_ENV]: "9001/" }), null, "'9001/' makes the path //mcp, which the daemon 404s: the entry is dead");
+    assert.deepEqual(effectiveMcpTarget({ [DAEMON_PORT_ENV]: "8790/mcp?x" }), null, "a query in the value makes the request target /mcp?x/mcp, which the daemon 404s");
+    assert.deepEqual(effectiveMcpTarget({ [DAEMON_PORT_ENV]: "8790#" }), null, "a fragment in the value makes the request target /, which the daemon 404s");
+    assert.deepEqual(effectiveMcpTarget({ [DAEMON_PORT_ENV]: "8790@127.0.0.2:8790" }), null, "userinfo redirects the host to 127.0.0.2: the daemon binds 127.0.0.1 only, the entry is dead");
+    assert.deepEqual(effectiveMcpTarget({ [DAEMON_PORT_ENV]: "x@127.0.0.1:8790" }), null, "userinfo alone also means a redirected target");
+    assert.deepEqual(effectiveMcpTarget({ [DAEMON_PORT_ENV]: "abc" }), null, "an unparseable value makes an invalid URL: the entry is dead");
+    assert.deepEqual(effectiveMcpTarget({ [DAEMON_PORT_ENV]: "0" }), null, "port 0 is not a port");
+    await withBundle(HTTP_ENTRY, async () => {
+      assert.equal(await daemonToolsDown({ [DAEMON_PORT_ENV]: "9001/" }, "claude-code"), true, "a dead entry fails open even if some other port answers 204");
+    });
+  });
+
+  test("#11 another agent sharing the release tree never gates, manifest or not", async () => {
+    // codex runs ${PLUGIN_ROOT}/hook.mjs — the same root file that sits next to the claude-code
+    // http manifest — so the manifest alone must never arm the gate for it (finding: the gate
+    // once disabled codex's interception on every daemon-less machine).
+    await withBundle(HTTP_ENTRY, async () => {
+      assert.equal(daemonEntryExpected(), true, "the shared tree does ship the http manifest");
+      for (const agent of ["codex", "gemini", "qwen", "copilot-cli", "vscode", "kiro", "zcode", "pi", "opencode"]) {
+        assert.equal(await daemonToolsDown({ [DAEMON_PORT_ENV]: String(DEAD_PORT) }, agent), false, agent + " never gates");
+      }
+      assert.equal(await daemonToolsDown({ [DAEMON_PORT_ENV]: String(DEAD_PORT) }, "claude-code"), true, "claude-code still gates");
+    });
+  });
+
+  test("#11 a trickling server cannot hold the probe past its deadline (Copilot review)", async () => {
+    // Valid but never-completed headers, one fragment every 200 ms: the socket never goes inactive
+    // (the request's own timeout never fires) and the response event never arrives (no \r\n\r\n),
+    // so only the probe's absolute deadline ends it. Garbage bytes would fail on a parse error
+    // instead and pass without the deadline — the fragments must be header-shaped (Copilot review).
+    const trickle = createServer((req, res) => {
+      res.socket.write("HTTP/1.1 200 OK\r\n");
+      const iv = setInterval(() => { try { res.socket.write("X-Trickle: fragment\r\n"); } catch { /* gone */ } }, 200);
+      res.on("close", () => clearInterval(iv));
+    });
+    await new Promise((r) => trickle.listen(0, "127.0.0.1", r));
+    try {
+      await withBundle(HTTP_ENTRY, async () => {
+        const start = Date.now();
+        assert.equal(await daemonToolsDown({ [DAEMON_PORT_ENV]: String(trickle.address().port) }, "claude-code"), true, "a trickling server reads as down");
+        const elapsed = Date.now() - start;
+        assert.ok(elapsed < 4000, "the probe ends at its deadline, not at the host's hook timeout: " + elapsed + "ms");
+      });
+    } finally {
+      trickle.close();
+    }
+  });
+
+  test("#11 a degraded daemon fails /healthz, and the gate reads it as tools-down (Copilot review)", async () => {
+    // --no-experimental-sqlite makes isDegraded() true (node:sqlite fails to import), the mode
+    // that registers ctx_doctor only — exactly the hollow-server state the 503 exists for.
+    const daemonSrc = join(import.meta.dirname, "..", "src", "entries", "daemon.ts");
+    const child = spawn(process.execPath, [daemonSrc, "--port", "0"], {
+      env: { ...process.env, HOME: bed.root, USERPROFILE: bed.root, NODE_OPTIONS: "--no-experimental-sqlite" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let url = "";
+    try {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("daemon did not print its banner: " + banner)), 20000);
+        let banner = ""; // accumulated: a data event is not a line boundary, the banner can split across chunks (Copilot review)
+        child.stdout.setEncoding("utf8");
+        child.stdout.on("data", (chunk) => {
+          banner += chunk;
+          const line = banner.split("\n").find((l) => l.startsWith("context-mode daemon listening on "));
+          if (line !== undefined) { clearTimeout(timer); url = line.slice("context-mode daemon listening on ".length); resolve(); }
+        });
+        child.once("exit", (code) => reject(new Error("daemon exited before the banner (code " + code + ")")));
+      });
+      const health = await fetch(url.replace(/\/mcp$/, "/healthz"));
+      assert.equal(health.status, 503, "degraded mode must not answer the healthy 204");
+      const port = Number(new URL(url).port);
+      await withBundle(HTTP_ENTRY, async () => {
+        assert.equal(await daemonToolsDown({ [DAEMON_PORT_ENV]: String(port) }, "claude-code"), true, "the gate reads a degraded daemon as tools-down");
+      });
+    } finally {
+      child.kill();
+    }
+  });
+
+  test("#11 an env proxy never routes the loopback probe (Copilot review)", async () => {
+    // NODE_USE_ENV_PROXY routes the global agent through HTTP_PROXY; a proxy without a loopback
+    // NO_PROXY cannot answer for 127.0.0.1 and would read every healthy daemon as down. The probe
+    // uses its own Agent, so it stays direct. Run in a child (the env proxy is read at startup),
+    // async: spawnSync would freeze this process' loop and the stub could never answer.
+    const script = join(bed.root, "proxy-probe.mjs");
+    writeFileSync(script, 'const g = await import(process.argv[4]);\n' +
+      'process.argv[1] = process.argv[2];\n' +
+      'const down = await g.daemonToolsDown({ CONTEXT_MODE_DAEMON_PORT: process.argv[3] }, "claude-code");\n' +
+      'console.log(down ? "down" : "up");\n');
+    const bundle = fakeBundle(HTTP_ENTRY);
+    const child = spawn(process.execPath, [script, bundle.hook, String(bed.up204), pathToFileURL(join(import.meta.dirname, "..", "src", "core", "hooks", "daemon-gate.ts")).href], {
+      env: { PATH: process.env.PATH ?? "", HOME: bed.root, USERPROFILE: bed.root, NODE_USE_ENV_PROXY: "1", HTTP_PROXY: "http://127.0.0.1:" + DEAD_PORT },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    try {
+      const answer = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("proxy-probe child did not answer")), 30000);
+        let out = "";
+        child.stdout.setEncoding("utf8");
+        child.stdout.on("data", (d) => { out += d; const nl = out.indexOf("\n"); if (nl >= 0) { clearTimeout(timer); resolve(out.slice(0, nl).trim()); } });
+        child.once("exit", (code) => reject(new Error("proxy-probe child exited (code " + code + ")")));
+      });
+      assert.equal(answer, "up", "the probe ignores HTTP_PROXY: a healthy daemon reads as up");
+    } finally {
+      child.kill();
+      rmSync(bundle.dir, { recursive: true, force: true });
+      rmSync(script, { force: true });
+    }
   });
 });
