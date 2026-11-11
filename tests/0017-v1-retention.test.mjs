@@ -1,7 +1,7 @@
 // ADR-0017 (v1 retention): v1 vs v2 differential, and the v1 executor, store and Windows build-tool cases ported to v2.
 // Moved from tests/{compat/v1-v2-diff,tools/v1-executor-ported,tools/v1-store-ported,sandbox/win-build-ported}.test.mjs. Names and bodies unchanged.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,14 +45,30 @@ describe("ADR-0017: every v1 PreToolUse call through the built v2 hook bundle", 
     failClosed: ["D-V1DIFF-SECMODULE-1", (r) => (r.v1.reason || "").includes("fail-closed engaged")],
   };
 
-  let work, bundle;
-  before(() => {
+  let work, bundle, stub, stubPort;
+  before(async () => {
     work = mkdtempSync(join(tmpdir(), "cm-v1diff-"));
     bundle = join(work, "out");
     const b = spawnSync(process.execPath, [join(ROOT, "build", "build.mjs"), "--out", bundle], { encoding: "utf8", cwd: ROOT });
     assert.equal(b.status, 0, b.stderr);
+    // kaovilai/context-mode#11: the claude-code hook gates its ctx-routing denies on the daemon's
+    // /healthz, so without a reachable daemon-side the gate correctly fails open and every v1
+    // deny the differential expects would read as an unclassified allow. A detached stub child
+    // answers 204 on an ephemeral port (detached: the run() below uses spawnSync, which freezes
+    // this process' event loop and would starve an in-process server).
+    stub = spawn(process.execPath, ["-e", 'const{createServer}=require("node:http");const s=createServer((q,r)=>{if(q.url==="/healthz")r.writeHead(204).end();else r.writeHead(404).end();});s.listen(0,"127.0.0.1",()=>process.stdout.write(String(s.address().port)+"\\n"));process.stdin.resume();process.stdin.on("end",()=>process.exit(0));'], { stdio: ["pipe", "pipe", "inherit"] });
+    stubPort = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("daemon stub did not print its port")), 30000);
+      // error listener before stdout: on descriptor exhaustion spawn can queue an error with no stdout at all (Copilot review #15)
+      let out = "";
+      const fail = (err) => { clearTimeout(timer); reject(err); };
+      stub.on("error", fail);
+      if (stub.stdout === null) { fail(new Error("spawn gave no stdout (descriptor exhaustion?)")); return; }
+      stub.stdout.setEncoding("utf8");
+      stub.stdout.on("data", (d) => { out += d; const nl = out.indexOf("\n"); if (nl >= 0) { clearTimeout(timer); resolve(Number(out.slice(0, nl).trim())); } });
+    });
   });
-  after(() => rmSync(work, { recursive: true, force: true }));
+  after(() => { stub?.kill(); rmSync(work, { recursive: true, force: true }); });
 
   function translate(row, agent) {
     let tool = row.tool ?? "", input = row.input ?? {};
@@ -79,7 +95,7 @@ describe("ADR-0017: every v1 PreToolUse call through the built v2 hook bundle", 
     }
     const { tool, input } = translate(row, agent);
     const payload = { session_id: "s-" + row.id, cwd: repo, hook_event_name: agent === "gemini" ? "BeforeTool" : "PreToolUse", tool_name: tool, tool_input: input };
-    const r = spawnSync(process.execPath, [join(bundle, "hook.mjs"), "--agent", agent], { input: JSON.stringify(payload), encoding: "utf8", cwd: repo, env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, CLAUDE_PROJECT_DIR: repo } });
+    const r = spawnSync(process.execPath, [join(bundle, "hook.mjs"), "--agent", agent], { input: JSON.stringify(payload), encoding: "utf8", cwd: repo, env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, CLAUDE_PROJECT_DIR: repo, CONTEXT_MODE_DAEMON_PORT: String(stubPort) } });
     assert.ok(r.status === 0 || r.status === 2, `${row.id}: hook exit ${r.status}: ${r.stderr}`); // the hook never errors: exit 0, or 2 for a host that denies by exit code
     return r.status === 2 || r.stdout.includes('"deny"') ? "deny" : "allow";
   }

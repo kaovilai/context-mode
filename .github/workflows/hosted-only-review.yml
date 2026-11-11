@@ -39,10 +39,15 @@ jobs:
     # same-repository PRs only: compare the head repo's full_name with this repository — NOT
     # head.repo.fork, which is true whenever the head repository is itself a fork, and this repo
     # is one (kaovilai/context-mode forks mksglu/context-mode), so that flag would skip every
-    # same-repo PR too (Copilot review, #14). A cross-repo PR gets no secrets; the job would
-    # only start and die at the proxy step with a confusing red run.
+    # same-repo PR too (Copilot review, #14). The same-repo requirement covers the comment
+    # triggers too where the payload knows the head repo (pull_request_review_comment): a
+    # comment-triggered run executes in the base-repo context WITH secrets, so a cross-repo PR
+    # must never reach the mention path (hosted-only review, #15 — the classic pwn-request
+    # shape). issue_comment payloads carry no head repo; there the OWNER/MEMBER/COLLABORATOR
+    # gate below is the guard, and this fork takes no outside PRs.
     if: >-
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'pull_request' && github.event_name != 'pull_request_review_comment' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
       (github.event_name == 'pull_request' ||
        (vars.HOSTED_ONLY_CLAUDE_MENTIONS == 'true' &&
         contains(github.event.comment.body, '@claude') &&
@@ -83,11 +88,15 @@ jobs:
         run: |
           set -euo pipefail
           command -v zsh >/dev/null 2>&1 || {
-            # ubuntu-26.04 runners intermittently fail DNS for security.ubuntu.com (seen twice in
-            # a row 2026-11-11 while status.canonical.com showed the mirror Operational and every
-            # public resolver answered): when the runner's resolver cannot, fall back to public
-            # resolvers and let apt retry the fetch.
-            if ! getent hosts security.ubuntu.com >/dev/null 2>&1; then
+            # ubuntu-26.04 runners intermittently fail DNS for the apt mirrors (seen twice in
+            # a row 2026-11-11 while status.canonical.com showed them Operational and every
+            # public resolver answered). The getent guard probes every host apt's mirror list
+            # names — azure.archive.ubuntu.com (priority 1), archive.ubuntu.com (2) and
+            # security.ubuntu.com (3); zsh comes from the archive mirrors, so probing the
+            # security host alone would miss the failure that actually breaks the fetch
+            # (hosted-only review, #15). When any fails, fall back to public resolvers and let
+            # apt retry.
+            if ! getent hosts azure.archive.ubuntu.com >/dev/null 2>&1 || ! getent hosts archive.ubuntu.com >/dev/null 2>&1 || ! getent hosts security.ubuntu.com >/dev/null 2>&1; then
               sudo mkdir -p /etc/systemd/resolved.conf.d
               printf '[Resolve]\nDNS=1.1.1.1 8.8.8.8\nFallbackDNS=9.9.9.9\n' | sudo tee /etc/systemd/resolved.conf.d/public-dns.conf >/dev/null
               sudo systemctl restart systemd-resolved
