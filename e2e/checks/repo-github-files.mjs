@@ -31,9 +31,12 @@ export function check() {
     const src = read(path.join(GH, "workflows", f));
     // FORK ONLY: this fork keeps pull requests enabled (upstream disabled them, ADR-0014 §5),
     // and the agentic-workflow-locks check must run on a PR that touches a workflow .md or a
-    // lock file before it can reach main
-    const forkPrAllowed = f === "agentic-workflow-locks.yml";
-    need(forkPrAllowed || !/^\s*pull_request(_target)?\s*:/m.test(src), `workflows/${f} must have no pull_request trigger`);
+    // lock file before it can reach main. The hosted-only PR reviewer (owner 2026-11-11: the fork
+    // takes no outside PRs, its own PRs get the GLM reviewer) also runs on pull_request events.
+    // pull_request_target is never allowed, not even on the exempted files: it runs in the base
+    // branch's context with the repo secrets and the app token (CodeRabbit review, #14).
+    const forkPrAllowed = f === "agentic-workflow-locks.yml" || f === "hosted-only-review.yml";
+    need(forkPrAllowed ? !/^\s*pull_request_target\s*:/m.test(src) : !/^\s*pull_request(_target)?\s*:/m.test(src), `workflows/${f} must have no ${forkPrAllowed ? "pull_request_target" : "pull_request"} trigger`);
   }
 
   // bug.yml (§6.1)

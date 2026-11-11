@@ -36,11 +36,20 @@ env:
 jobs:
   review:
     runs-on: ubuntu-latest
+    # same-repository PRs only: compare the head repo's full_name with this repository — NOT
+    # head.repo.fork, which is true whenever the head repository is itself a fork, and this repo
+    # is one (kaovilai/context-mode forks mksglu/context-mode), so that flag would skip every
+    # same-repo PR too (Copilot review, #14). A cross-repo PR gets no secrets; the job would
+    # only start and die at the proxy step with a confusing red run.
     if: >-
-      github.event_name == 'pull_request' ||
-      (vars.HOSTED_ONLY_CLAUDE_MENTIONS == 'true' &&
-       contains(github.event.comment.body, '@claude') &&
-       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name == 'pull_request' ||
+       (vars.HOSTED_ONLY_CLAUDE_MENTIONS == 'true' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
+    # the turn cap is 100, so the job needs a wall-clock bound too: a runaway review must not
+    # burn the default 6-hour runner allocation (hosted-only GLM review, #14)
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: GitHub App token (skipped when APP_ID secret absent; falls back to github.token when app not installed on repo)
@@ -73,7 +82,18 @@ jobs:
           ENMAAS_API_KEY: ${{ secrets.ENMAAS_API_KEY }}
         run: |
           set -euo pipefail
-          command -v zsh >/dev/null 2>&1 || sudo apt-get install -y -qq zsh
+          command -v zsh >/dev/null 2>&1 || {
+            # ubuntu-26.04 runners intermittently fail DNS for security.ubuntu.com (seen twice in
+            # a row 2026-11-11 while status.canonical.com showed the mirror Operational and every
+            # public resolver answered): when the runner's resolver cannot, fall back to public
+            # resolvers and let apt retry the fetch.
+            if ! getent hosts security.ubuntu.com >/dev/null 2>&1; then
+              sudo mkdir -p /etc/systemd/resolved.conf.d
+              printf '[Resolve]\nDNS=1.1.1.1 8.8.8.8\nFallbackDNS=9.9.9.9\n' | sudo tee /etc/systemd/resolved.conf.d/public-dns.conf >/dev/null
+              sudo systemctl restart systemd-resolved
+            fi
+            sudo apt-get install -y -qq -o Acquire::Retries=5 zsh
+          }
           zsh -c '
             set -eu
             source "$RUNNER_TEMP/dotfiles/scripts/hosted-only-proxy.zsh"
@@ -88,7 +108,7 @@ jobs:
         with:
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           prompt: "Review this PR. Read the diff and changed files, verify each concern against the code, then post one GitHub review: inline comments on real problems only (correctness, security, breakage — no style nits, no praise), each tagged [high]/[medium]/[low], plus a short summary comment."
-          claude_args: '--effort high --max-turns 50 --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*),mcp__github__*"'
+          claude_args: '--effort high --max-turns 100 --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*),mcp__github__*"'
       - name: Upload claude execution output (debug transcript)
         if: always()
         uses: actions/upload-artifact@v4
