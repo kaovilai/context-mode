@@ -27,8 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     # same-repository PRs only: for a cross-fork PR the head branch lives in the other
     # repository, so checking it out here cannot work (and validating the wrong same-named
-    # branch would be worse than skipping)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    # branch would be worse than skipping). head.repo.full_name vs github.repository, not
+    # head.repo.fork: same-repo PRs from a fork of the same repo (test forks) have fork=false
+    # set only by convention — full_name is the identity check (same form as hosted-only-review).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
       - name: Checkout repository
