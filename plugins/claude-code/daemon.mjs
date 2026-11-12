@@ -29676,7 +29676,7 @@ function PURGE_SUMMARY(rows, scope) {
 var DECISION_SOURCE = "decision";
 var DECISION_USER_LABEL = "decision (user)";
 var RELEASE_REPO_URL = "https://github.com/mksglu/context-mode.git";
-var BUNDLE_SHA = true ? "ec223a30aa1b5ec1c92da6e80f36e13aad1ec35b" : void 0;
+var BUNDLE_SHA = true ? "0dd72ce34fe238ad13ff4a230bb8a82f05c1a4fb" : void 0;
 var DOCTOR_CHECK_ORDER = Object.freeze(["D1", "D2", "D3", "D4", "D5", "D5b", "D6", "D7", "D8", "D9", "D10", "D11"]);
 var DOCTOR_LABEL = Object.freeze({
   D1: "version",
@@ -60323,7 +60323,8 @@ async function startDaemon(argv, env, onStopped) {
       return;
     }
     if (req.method === "GET" && req.url === DAEMON_HEALTH_PATH) {
-      res.writeHead(204).end();
+      if (core.degraded) res.writeHead(503, { "content-type": "text/plain" }).end("degraded: only ctx_doctor is registered\n");
+      else res.writeHead(204).end();
       return;
     }
     if (req.url !== DAEMON_PATH) {
