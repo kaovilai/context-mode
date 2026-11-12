@@ -371,7 +371,9 @@ import { DatabaseSync } from "node:sqlite";
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const HOOK_BUNDLE = path.join(path.resolve(__dirname, "..", ".."), "release-out", "hook.mjs");
 
-  test("[R54] GP3/own-file-symlinked-skill: a skill reference under a symlinked ~/.claude/skills dir passes whole (#1345)", (t) => {
+  // [M5] like the sibling Read-replacement e2e rows (pi-read-hint-parity): the runner's --milestone
+  // gate matches [M0]-[Mn] only, so an [R54] tag never runs in the M6 CI gate (Copilot, PR #16).
+  test("[M5] GP3/own-file-symlinked-skill: a skill reference under a symlinked ~/.claude/skills dir passes whole (#1345)", async (t) => {
     const root = mkdtempSync(path.join(tmpdir(), "cm-gp3-1345-"));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const repo = path.join(root, "repo");
@@ -384,20 +386,23 @@ import { DatabaseSync } from "node:sqlite";
     symlinkSync(target, path.join(root, ".claude", "skills", "python3"));
     const env = { PATH: process.env.PATH, HOME: root, USERPROFILE: root, CLAUDE_PROJECT_DIR: repo };
     writeFileSync(path.join(root, "dotfiles", "skills", "outside.md"), content);
-    const read = (name, filePath = path.join(root, ".claude", "skills", "python3", "references", name)) => {
+    const read = async (name, filePath = path.join(root, ".claude", "skills", "python3", "references", name)) => {
       const n = content.split("\n").length;
       const payload = {
         session_id: "gp3-1345", cwd: repo, hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: filePath }, tool_use_id: "toolu_gp3_1345_" + name,
         tool_response: { type: "text", file: { filePath, content, numLines: n, startLine: 1, totalLines: n } },
       };
-      const r = spawnSync(process.execPath, [HOOK_BUNDLE, "--agent", "claude-code"], { input: JSON.stringify(payload), cwd: repo, env, encoding: "utf8" });
-      assert.equal(r.status, 0, r.stderr);
+      // runHookFixture (not a bare spawn): the harness's stub daemon answers /healthz while this
+      // test waits, so a machine with no daemon still exercises the replace route instead of
+      // failing open on empty stdout (#11, Copilot PR #16).
+      const r = await runHookFixture(HOOK_BUNDLE, "claude-code", payload, env);
+      assert.equal(r.exitCode, 0, r.stderr);
       return r.stdout;
     };
-    assert.equal(read("api.md"), "", "the linked skill reference reaches the model whole");
-    assert.ok(read("log.jsonl").includes("updatedToolOutput"), "data through the same link still replaces");
+    assert.equal(await read("api.md"), "", "the linked skill reference reaches the model whole");
+    assert.ok((await read("log.jsonl")).includes("updatedToolOutput"), "data through the same link still replaces");
     // A ".." step through the link reads dotfiles/skills/outside.md on disk, which is not an own file: it still replaces.
-    assert.ok(read("dotdot", [root, ".claude", "skills", "python3", "..", "outside.md"].join(path.sep)).includes("updatedToolOutput"), "a .. step through the link still replaces");
+    assert.ok((await read("dotdot", [root, ".claude", "skills", "python3", "..", "outside.md"].join(path.sep))).includes("updatedToolOutput"), "a .. step through the link still replaces");
   });
 }
 
