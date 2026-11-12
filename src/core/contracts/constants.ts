@@ -554,7 +554,7 @@ export const DAEMON_CHECK_DOWN_DETAIL = "no daemon answers on the configured por
 // plugin's daemon entry (and its x-context-mode-session header). The row appears only when the entry exists.
 export const CLAUDE_ENTRY_CHECK_ID = "D13";
 export const CLAUDE_ENTRY_CHECK_LABEL = "claude-entry";
-export const CLAUDE_ENTRY_CHECK_DETAIL = "user-scope claude-code MCP entry mcpServers.context-mode in ~/.claude.json duplicates the plugin's daemon URL, so Claude Code drops the plugin's MCP entry (and its session header)"; // + "; " + entry url when known
+export const CLAUDE_ENTRY_CHECK_DETAIL = "user-scope claude-code MCP entry mcpServers.context-mode in ~/.claude.json duplicates the plugin's daemon URL, so Claude Code drops the plugin's MCP entry (and its session header)"; // + "; " + masked scheme://host of the entry url when known (2.2.8: never verbatim — credentials)
 export const CLAUDE_ENTRY_CHECK_FIX = "claude mcp remove context-mode -s user"; // setup and ctx_upgrade remove it too
 // The daemon's connect line kept teaching `claude mcp add` after the plugin shipped its own daemon entry
 // (2.2.5): every user who copied it re-created the suppressing entry. Printed right after the add command.

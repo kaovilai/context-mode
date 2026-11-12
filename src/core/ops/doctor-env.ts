@@ -322,10 +322,25 @@ export async function checkDaemon(env: NodeJS.ProcessEnv): Promise<DoctorRow | u
 // only when ~/.claude.json holds a user-scope context-mode MCP entry, so the default report is unchanged.
 // A WARN, never a FAIL: the manual entry still serves the daemon, it only costs the plugin entry (and its
 // session header) — but the fix is one command, so the row says it.
+// 2.2.8: the entry's URL is user config and can carry credentials in userinfo, path or query, and doctor
+// reports get pasted into failing-check issue bodies — so D13 never prints it verbatim. Only scheme://host
+// survives (host:port included, everything after dropped); an unparseable URL is omitted entirely rather
+// than risked.
+function maskUrlCredentials(url: string): string | undefined {
+  if (url === "") return undefined;
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return undefined;
+  }
+}
+
 export function checkClaudeEntry(env: NodeJS.ProcessEnv, home: string | null): DoctorRow | undefined {
   if (home === null) return undefined;
   const entry = claudeUserMcpEntry(env, home);
   if (entry === undefined) return undefined;
-  const url = entry.url === "" ? "" : ` (${entry.url})`;
+  const masked = maskUrlCredentials(entry.url);
+  const url = masked === undefined ? "" : ` (${masked})`;
   return { id: "D13", label: CLAUDE_ENTRY_CHECK_LABEL, status: "WARN", detail: CLAUDE_ENTRY_CHECK_DETAIL + url, fixCommand: CLAUDE_ENTRY_CHECK_FIX };
 }

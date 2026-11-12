@@ -2119,13 +2119,35 @@ describe("ADR-0010 ctx_doctor tool: all checks and order", { concurrency: CONC }
     assert.equal(row.label, "claude-entry");
     assert.equal(row.fixCommand, "claude mcp remove context-mode -s user");
     assert.match(row.detail, /duplicates the plugin's daemon URL/);
-    assert.match(row.detail, /http:\/\/127\.0\.0\.1:8790\/mcp/);
+    assert.match(row.detail, /http:\/\/127\.0\.0\.1:8790\)/, "masked scheme://host survives");
+    assert.equal(row.detail.includes("8790/mcp"), false, "path is masked, never the verbatim URL");
     const clean = await doctor(tmp(t));
     assert.equal(clean.rows.some((r) => r.id === "D13"), false, "no row on a clean machine");
     // An unparseable ~/.claude.json is the host's own file: no row, never an error.
     const broken = tmp(t);
     put(path.join(broken, ".claude.json"), "{not json");
     assert.equal((await doctor(broken)).rows.some((r) => r.id === "D13"), false);
+  });
+
+  // 2.2.8 credential exposure: the entry URL is user config (userinfo, path, query can all carry secrets)
+  // and doctor reports get pasted into issue bodies — D13 must show scheme://host only, never the URL.
+  test("[D13] claude-entry row masks the entry URL's credentials (userinfo, path, query)", async (t) => {
+    const home = tmp(t);
+    const secretUrl = "https://user:pass@example.com/secret/path?token=abc123";
+    put(path.join(home, ".claude.json"), { mcpServers: { "context-mode": { type: "http", url: secretUrl } } });
+    const row = (await doctor(home)).rows.find((r) => r.id === "D13");
+    assert.ok(row, "row appears for a configured entry");
+    assert.equal(row.detail.includes(secretUrl), false, "verbatim URL never printed");
+    assert.equal(row.detail.includes("user:pass"), false, "userinfo masked");
+    assert.equal(row.detail.includes("secret/path"), false, "path masked");
+    assert.equal(row.detail.includes("token=abc123"), false, "query masked");
+    assert.match(row.detail, /\(https:\/\/example\.com\)$/, "masked scheme://host survives");
+    // An unparseable URL is omitted entirely rather than risked.
+    const junk = tmp(t);
+    put(path.join(junk, ".claude.json"), { mcpServers: { "context-mode": { type: "http", url: "not a url" } } });
+    const junkRow = (await doctor(junk)).rows.find((r) => r.id === "D13");
+    assert.ok(junkRow);
+    assert.equal(junkRow.detail.includes("not a url"), false, "unparseable URL omitted");
   });
 
   test("[M5] doctor/D8-stale-schema-and-integrity-check-are-distinct-detail-strings", async (t) => {
