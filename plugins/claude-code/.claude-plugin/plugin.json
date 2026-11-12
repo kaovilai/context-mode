@@ -7,14 +7,13 @@
   "hooks": "./hooks/claude-code.json",
   "mcpServers": {
     "context-mode": {
-      "args": [
-        "${CLAUDE_PLUGIN_ROOT}/server.mjs",
-        "--agent",
-        "claude-code"
-      ],
-      "command": "node"
+      "headers": {
+        "x-context-mode-session": "${CLAUDE_CODE_SESSION_ID}"
+      },
+      "type": "http",
+      "url": "http://127.0.0.1:${CONTEXT_MODE_DAEMON_PORT:-8790}/mcp"
     }
   },
   "name": "context-mode",
-  "version": "2.1.8"
+  "version": "2.2.7"
 }

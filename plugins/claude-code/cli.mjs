@@ -9855,8 +9855,9 @@ function hookRegisteredCheck(row, env, list2) {
   const oc2 = issue === void 0 && row.id === "opencode" && h2.kind === "plugin-list" && hostBin("opencode", env).file !== void 0 && opencodeMajor("opencode", env) >= 2;
   return { name: "hook-registered", ok: false, detail: issue ?? `${h2.file} lacks the context-mode hook entry${oc2 ? "; run: opencode plugin add context-mode" : ""}` };
 }
-function hookRunsCheck(row, env) {
+async function hookRunsCheck(row, env) {
   const root = mkdtempSync(path12.join(tmpdir2(), "cm-doctor-runs-"));
+  let stub = null;
   try {
     const home = path12.join(root, "home");
     const proj = path12.join(root, "proj");
@@ -9867,11 +9868,45 @@ function hookRunsCheck(row, env) {
     const { effect, payload } = hookSample(row.id, proj, text2);
     const sampleEnv = { ...env, HOME: home, USERPROFILE: home };
     delete sampleEnv.CLAUDE_PROJECT_DIR;
+    if (row.id === "claude-code") {
+      const child = spawn3(process.execPath, ["-e", 'const{createServer}=require("node:http");const s=createServer((q,r)=>{if(q.url==="/healthz")r.writeHead(204).end();else r.writeHead(404).end();});s.listen(0,"127.0.0.1",()=>process.stdout.write(String(s.address().port)+"\\n"));process.stdin.resume();process.stdin.on("end",()=>process.exit(0));'], { stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
+      stub = child;
+      let stubFailed;
+      try {
+        const port = await new Promise((resolve3, reject) => {
+          const timer = setTimeout(() => reject(new Error("daemon stub did not print its port")), VERIFY_TIMEOUT_MS);
+          let out2 = "";
+          const fail = (err2) => {
+            clearTimeout(timer);
+            reject(err2);
+          };
+          child.on("error", fail);
+          if (child.stdout === null) {
+            fail(new Error("spawn gave no stdout (descriptor exhaustion?)"));
+            return;
+          }
+          child.stdout.setEncoding("utf8");
+          child.stdout.on("data", (d) => {
+            out2 += d;
+            const nl = out2.indexOf("\n");
+            if (nl >= 0) {
+              clearTimeout(timer);
+              resolve3(Number(out2.slice(0, nl).trim()));
+            }
+          });
+        });
+        sampleEnv[DAEMON_PORT_ENV] = String(port);
+      } catch (err2) {
+        stubFailed = "daemon stub: " + (err2 instanceof Error ? err2.message : String(err2));
+      }
+      if (stubFailed !== void 0) return { name: "hook-runs", ok: false, detail: stubFailed };
+    }
     const cmd = row.hookRunCommand;
     const r2 = spawnSync4(cmd[0], cmd.slice(1), { env: sampleEnv, cwd: proj, input: JSON.stringify(payload), encoding: "utf8", timeout: VERIFY_TIMEOUT_MS, windowsHide: true });
     const bad = sampleVerdict(row.id, effect, text2, { status: r2.status, stdout: `${r2.stdout ?? ""}`, stderr: `${r2.stderr ?? ""}` });
     return bad === null ? { name: "hook-runs", ok: true } : { name: "hook-runs", ok: false, detail: bad };
   } finally {
+    stub?.kill();
     rmSync2(root, { recursive: true, force: true });
   }
 }
@@ -10161,7 +10196,7 @@ async function verifyRow(row, ctx) {
   const en = hookEnabledCheck(row, ls.status);
   if (en) checks.push(en);
   if (row.copilotSettings) checks.push(await copilotEnabledCheck(row, ctx));
-  checks.push(hookRunsCheck(row, env), hookSeenCheck(row, dataRootOf(env, ctx.home)), skillsCheck(row, ctx.pkgDir));
+  checks.push(await hookRunsCheck(row, env), hookSeenCheck(row, dataRootOf(env, ctx.home)), skillsCheck(row, ctx.pkgDir));
   if (row.id === "pi") return withHookGate(checks, piSettingsGate(env, ctx.home, ctx.pkgDir, process.cwd()));
   if (row.id === "vscode") return withHookGate(checks, vscodeSettingsGate(env, ctx.home, process.cwd()));
   return row.id === "zcode" ? withHookGate(checks, zcodeConfigGate(ctx.home)) : checks;

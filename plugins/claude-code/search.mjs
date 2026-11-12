@@ -5462,6 +5462,8 @@ function READ_DENY_MESSAGE(path3, size, prefix = "") {
 function READ_DENY_RANGE_MESSAGE(path3, size) {
   return READ_DENY_RANGE_TEMPLATE.split(SIZE).join(String(size)).split(PATH).join(path3);
 }
+var READ_DENY_MARK = "over the one-read limit";
+var READ_DENY_HEAD_SUFFIX = "-byte file, " + READ_DENY_MARK;
 
 // src/core/policy/own-file.ts
 import { extname, join as join5, resolve as resolve4 } from "node:path";
@@ -5604,7 +5606,7 @@ var deny = (reason) => ({ kind: "deny", reason });
 var str = (v) => typeof v === "string" ? v : void 0;
 var present = (v) => v !== void 0 && v !== null;
 var has = (list2, v) => list2.includes(v);
-function decide(ev, row, userDeny, root = ev.cwd) {
+function decide(ev, row, userDeny, root = ev.cwd, toolsDown = false) {
   const tool = ev.tool;
   if (tool === void 0) return ALLOW;
   const canonical = tool.canonicalName;
@@ -5618,8 +5620,8 @@ function decide(ev, row, userDeny, root = ev.cwd) {
   const hit = userDenyHit(canonical, input, ev.cwd, rules);
   if (hit !== null) return deny(USER_DENY_REASON_PREFIX + hit);
   if (canonical === WEBFETCH) return webFetch(input, row);
-  if (canonical === BASH) return bash(ev, row, input, rules, root);
-  if (canonical === READ) return read(ev, row, input, root);
+  if (canonical === BASH) return bash(ev, row, input, rules, root, toolsDown);
+  if (canonical === READ) return read(ev, row, input, root, toolsDown);
   return ALLOW;
 }
 function denyMessage(kind, match, row, intent) {
@@ -5721,10 +5723,10 @@ function webFetch(input, row) {
   const url = str(input.url) ?? "";
   return neverDenied(url) ? ALLOW : deny(denyMessage("webfetch", url, row));
 }
-function bash(ev, row, input, rules, root) {
+function bash(ev, row, input, rules, root, toolsDown) {
   const cmd = str(input.command) ?? "";
   const parsed = parseShell(cmd);
-  if (!parsed.ok) return couldMatch(cmd, rules) ? deny(prefixToolNames(PARSE_ERROR_DENY_LINE, row.toolNamePrefix)) : psShellDump(ev, cmd, row, root) ?? ALLOW;
+  if (!parsed.ok) return couldMatch(cmd, rules) ? deny(prefixToolNames(PARSE_ERROR_DENY_LINE, row.toolNamePrefix)) : psShellDump(ev, cmd, row, root, toolsDown) ?? ALLOW;
   const cmds = unwrap(parsed.commands);
   for (const c of cmds) {
     const h = segmentHit(c, rules);
@@ -5736,7 +5738,7 @@ function bash(ev, row, input, rules, root) {
       if (kind !== null) return deny(denyMessage(kind, cmd, row, str(input.description)));
     }
   }
-  return shellDump(ev, cmds, row, root) ?? psShellDump(ev, cmd, row, root) ?? ALLOW;
+  return shellDump(ev, cmds, row, root, toolsDown) ?? psShellDump(ev, cmd, row, root, toolsDown) ?? ALLOW;
 }
 function denyKind(c) {
   const name = c.argv0.toLowerCase();
@@ -5779,10 +5781,10 @@ function fileSize(abs) {
     return -1;
   }
 }
-function bigDeny(ev, row, cwd, p, size, root) {
+function bigDeny(ev, row, cwd, p, size, root, toolsDown) {
   const abs = resolve5(cwd, p);
   if (size <= OUTPUT_CAP || isOwnFile(ev.agent, cwd, p)) return null;
-  return deny(executeCanOpen(root, abs) ? READ_DENY_MESSAGE(abs, size, row.toolNamePrefix) : READ_DENY_RANGE_MESSAGE(abs, size));
+  return deny(toolsDown || !executeCanOpen(root, abs) ? READ_DENY_RANGE_MESSAGE(abs, size) : READ_DENY_MESSAGE(abs, size, row.toolNamePrefix));
 }
 function executeCanOpen(root, abs) {
   if (typeof root === "string") return isInsideAny([root], abs);
@@ -5793,20 +5795,20 @@ function executeCanOpen(root, abs) {
     return false;
   }
 }
-function read(ev, row, input, root) {
+function read(ev, row, input, root, toolsDown) {
   if (!present(input.offset) && !present(input.limit)) {
     for (const p of readPaths(input)) {
       const abs = resolve5(ev.cwd, p);
       const size = fileSize(abs);
       if (size > OUTPUT_CAP && !isMediaRead(ev.agent, abs)) {
-        const d = bigDeny(ev, row, ev.cwd, p, size, root);
+        const d = bigDeny(ev, row, ev.cwd, p, size, root, toolsDown);
         if (d !== null) return d;
       }
     }
   }
   return ALLOW;
 }
-function shellDump(ev, cmds, row, root) {
+function shellDump(ev, cmds, row, root, toolsDown) {
   if (row.nativeTools.read !== void 0 && row.nativeTools.read.length > 0 && dumpRunsThenReplaces(row)) return null;
   let dir = ev.cwd;
   let verdict = null;
@@ -5822,15 +5824,15 @@ function shellDump(ev, cmds, row, root) {
       continue;
     }
     const abs = resolve5(dir, d.file);
-    const big = bigDeny(ev, row, dir, d.file, fileSize(abs), root);
+    const big = bigDeny(ev, row, dir, d.file, fileSize(abs), root, toolsDown);
     if (big !== null) return big;
   }
   return verdict;
 }
-function psShellDump(ev, cmd, row, root) {
+function psShellDump(ev, cmd, row, root, toolsDown) {
   if (row.nativeTools.read !== void 0 && row.nativeTools.read.length > 0 && dumpRunsThenReplaces(row)) return null;
   for (const abs of psDumpFiles(cmd, ev.cwd)) {
-    const d = bigDeny(ev, row, ev.cwd, abs, fileSize(abs), root);
+    const d = bigDeny(ev, row, ev.cwd, abs, fileSize(abs), root, toolsDown);
     if (d !== null) return d;
   }
   return null;
