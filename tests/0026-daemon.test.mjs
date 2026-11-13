@@ -81,7 +81,12 @@ describe("ADR-0026 daemon flags and unit", { concurrency: CONC }, () => {
     assert.ok(DAEMON_ADD_CAVEAT.includes("claude mcp remove context-mode -s user"), DAEMON_ADD_CAVEAT);
     assert.ok(DAEMON_ADD_CAVEAT.includes("drop the plugin"), DAEMON_ADD_CAVEAT);
     assert.ok(DAEMON_HELP.includes(DAEMON_ADD_CAVEAT), "help carries the caveat");
-    const r = spawnSync(process.execPath, [join(REPO, "src", "entries", "daemon.ts"), "--print-command"], { encoding: "utf8", timeout: 30000 });
+    // fork-sync validation runs the suite with CONTEXT_MODE_DAEMON_PORT=0; the printed line describes
+    // the default install, so the spawned print-command must not see that env override (it printed
+    // :0 and failed this test under the fork-sync runner).
+    const printEnv = { ...process.env };
+    delete printEnv.CONTEXT_MODE_DAEMON_PORT;
+    const r = spawnSync(process.execPath, [join(REPO, "src", "entries", "daemon.ts"), "--print-command"], { encoding: "utf8", timeout: 30000, env: printEnv });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     const lines = r.stdout.split("\n").filter((l) => l !== "");
     assert.equal(lines[0], DAEMON_ADD_COMMAND(`http://127.0.0.1:${DAEMON_DEFAULT_PORT}/mcp`));

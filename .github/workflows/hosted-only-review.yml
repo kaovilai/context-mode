@@ -52,7 +52,7 @@ jobs:
        (vars.HOSTED_ONLY_CLAUDE_MENTIONS == 'true' &&
         contains(github.event.comment.body, '@claude') &&
         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
-    # the turn cap is 100, so the job needs a wall-clock bound too: a runaway review must not
+    # the turn cap is 120, so the job needs a wall-clock bound too: a runaway review must not
     # burn the default 6-hour runner allocation (hosted-only GLM review, #14)
     timeout-minutes: 30
     steps:
@@ -116,8 +116,10 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           github_token: ${{ steps.app-token.outputs.token || github.token }}
+          # The Copilot app (copilot-swe-agent) pushes to this branch; its commits must clear the actor gate.
+          allowed_bots: "Copilot"
           prompt: "Review this PR. Read the diff and changed files, verify each concern against the code, then post one GitHub review: inline comments on real problems only (correctness, security, breakage — no style nits, no praise), each tagged [high]/[medium]/[low], plus a short summary comment."
-          claude_args: '--effort high --max-turns 100 --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*),mcp__github__*"'
+          claude_args: '--effort high --max-turns 120 --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*),mcp__github__*"'
       - name: Upload claude execution output (debug transcript)
         if: always()
         uses: actions/upload-artifact@v4

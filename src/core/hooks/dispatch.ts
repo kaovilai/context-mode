@@ -21,7 +21,7 @@ import { decide } from "../policy/decide.ts";
 import { isReadDeny } from "../policy/read-deny.ts";
 import { daemonToolsDown, hookBypassed } from "./daemon-gate.ts";
 import { isOwnFile } from "../policy/own-file.ts";
-import { isSubagentCall, pickSubagentCase, toolSetForAgentType } from "../policy/subagent.ts";
+import { isSubagentCall, pickSubagentCase, toolSetForAgentType, type ToolSetSources } from "../policy/subagent.ts";
 import { readUserDeny } from "../policy/user-deny.ts";
 import { resolveProject } from "../project/resolve.ts";
 import { claudeDirOf, homeDirOf } from "../project/config-dir.ts";
@@ -328,6 +328,13 @@ function askDetached(ev: CanonicalHookEvent, project: ProjectContext, tool: Tool
     });
 }
 
+// ADR-0016 l.23 (#1348): an in-process host hands the agent's tool set on the event; it is the manifest source.
+function toolSetSources(ev: CanonicalHookEvent, project: ProjectContext, env: NodeJS.ProcessEnv): ToolSetSources {
+  const src: ToolSetSources = { projectDir: project.worktree, env };
+  if (ev.agentTools !== undefined) src.manifestTools = ev.agentTools;
+  return src;
+}
+
 // ---------- §4.5 PreToolUse ----------
 
 async function preToolUse(ev: CanonicalHookEvent, row: AdapterRow, project: ProjectContext, env: NodeJS.ProcessEnv): Promise<Decision> {
@@ -354,7 +361,7 @@ async function preToolUse(ev: CanonicalHookEvent, row: AdapterRow, project: Proj
     // D-SUB-NOCTX-1 (#1311): a deny names only tools the caller has. A caller without ctx_* tools runs the call:
     // a known tool set without them, or a named agent type no source defines on a row that replaces afterwards
     // (PostToolUse case C keeps a large output out). A call with no agent type inherits the session tools (case A).
-    const set = toolSetForAgentType(ev, { projectDir: project.worktree, env });
+    const set = toolSetForAgentType(ev, toolSetSources(ev, project, env));
     const subCase = pickSubagentCase(ev, set);
     const tool = ev.tool;
     const runs = set !== null || ((ev.agentType ?? "") !== "" && hasReplace(row));
@@ -467,7 +474,7 @@ async function postToolUse(ev: CanonicalHookEvent, row: AdapterRow, project: Pro
 function ownRead(ev: CanonicalHookEvent, tool: ToolCall, env: NodeJS.ProcessEnv): boolean {
   if (!RANGE_READ_TOOLS.includes(tool.canonicalName)) return false;
   const p = READ_PATH_KEYS.map((k) => tool.input[k]).find((v): v is string => typeof v === "string" && v !== "");
-  return p !== undefined && isOwnFile(ev.agent, resolve(ev.cwd, p), env);
+  return p !== undefined && isOwnFile(ev.agent, ev.cwd, p, env);
 }
 
 async function postReplace(ev: CanonicalHookEvent, row: AdapterRow, project: ProjectContext, env: NodeJS.ProcessEnv,
@@ -483,7 +490,7 @@ async function postReplace(ev: CanonicalHookEvent, row: AdapterRow, project: Pro
   if (!hasReplace(row)) return ALLOW;
   let label: string;
   if (isSubagentCall(ev)) {
-    const subCase = pickSubagentCase(ev, toolSetForAgentType(ev, { projectDir: project.worktree, env }));
+    const subCase = pickSubagentCase(ev, toolSetForAgentType(ev, toolSetSources(ev, project, env)));
     if (subCase === "A") return ALLOW;
     label = SUBAGENT_SOURCE_PREFIX + tool.canonicalName + ":" + String(ev.turn ?? 0);
   } else {
